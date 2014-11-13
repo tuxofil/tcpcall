@@ -1,0 +1,26 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# This has to be exported to make some magic below work.
+export DH_OPTIONS
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) clean compile html
+
+override_dh_auto_test:
+
+# Implement staged installation
+NAME = tcpcall
+DESTDIR = debian/erlang-$(NAME)
+DOC_DESTDIR = debian/erlang-$(NAME)-doc
+VERSION = $(shell cat version)
+ERL_APP_DIR = $(DESTDIR)/usr/lib/erlang/lib/$(NAME)-$(VERSION)
+override_dh_install:
+	install -m 755 -d $(ERL_APP_DIR)/ebin
+	install -m 644 ebin/*.app ebin/*.beam $(ERL_APP_DIR)/ebin
+	install -m 755 -d $(DOC_DESTDIR)/usr/share/doc/erlang-$(NAME)-doc
+	install -m 644 doc/*.html doc/*.css doc/*.png \
+	    $(DOC_DESTDIR)/usr/share/doc/erlang-$(NAME)-doc

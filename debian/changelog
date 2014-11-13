@@ -1,0 +1,5 @@
+erlang-tcpcall (0.2.0) unstable; urgency=low
+
+  * Initial release.
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 13 Nov 2014 15:56:00 +0200

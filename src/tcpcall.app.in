@@ -1,0 +1,16 @@
+%%% @author Aleksey Morarash <aleksey.morarash@gmail.com>
+%%% @since 10 Nov 2014
+%%% @copyright 2014, Aleksey Morarash <aleksey.morarash@gmail.com>
+%%% @doc tcpcall application resource file
+
+{application, tcpcall,
+ [
+  {description,  "TCP Request-Reply Bridge"},
+  {vsn,          "{{VERSION}}"},
+  {modules,      [tcpcall,
+                  tcpcall_lib,
+                  tcpcall_acceptor,
+                  tcpcall_client,
+                  tcpcall_server
+                 ]}
+ ]}.

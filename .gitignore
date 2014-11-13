@@ -1,0 +1,6 @@
+Emakefile
+.dialyzer_plt
+*.beam
+*.app
+*~
+erl_crash.dump

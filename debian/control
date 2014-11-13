@@ -1,0 +1,22 @@
+Source: erlang-tcpcall
+Section: devel
+Priority: extra
+Maintainer: Aleksey Morarash <aleksey.morarash@gmail.com>
+Build-Depends: debhelper (>= 8.0.0), erlang-base, erlang-dev, erlang-tools,
+ erlang-edoc
+Standards-Version: 3.9.3
+Homepage: https://github.com/tuxofil/erlang-tcpcall
+Vcs-Browser: https://github.com/tuxofil/erlang-tcpcall
+Vcs-Git: https://github.com/tuxofil/erlang-tcpcall.git
+
+Package: erlang-tcpcall
+Architecture: all
+Depends: erlang-base
+Description: TCP-based Request-Reply Bridge between Erlang nodes
+ TCP-based Request-Reply Bridge between Erlang nodes.
+
+Package: erlang-tcpcall-doc
+Architecture: all
+Description: TCP Request-Reply Bridge developer documentation.
+ Contains generated HTML documentation for the TCP Request-Reply
+ Bridge source code.
