@@ -4,7 +4,7 @@ VERSION = $(shell cat version)
 
 .PHONY: all compile html clean eunit dialyze all-tests
 
-all:
+all: compile
 
 COPTS = {outdir, ebin}, {i, \"include\"}, warn_unused_function, \
  warn_bif_clash, warn_deprecated_function, warn_obsolete_guard, verbose, \
