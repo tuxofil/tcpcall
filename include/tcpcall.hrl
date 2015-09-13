@@ -10,6 +10,10 @@
 
 -define(SIG_STOP, stop).
 
+%% Connection pool balancer types
+-define(round_robin, round_robin).
+-define(random, random).
+
 %% ----------------------------------------------------------------------
 %% debugging
 

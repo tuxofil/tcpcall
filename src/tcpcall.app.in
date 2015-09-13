@@ -11,6 +11,7 @@
                   tcpcall_lib,
                   tcpcall_acceptor,
                   tcpcall_client,
+                  tcpcall_pool,
                   tcpcall_server
                  ]}
  ]}.

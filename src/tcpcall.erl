@@ -11,10 +11,13 @@
 -export(
    [listen/1,
     connect/1,
+    connect_pool/2,
     call/3,
+    call_pool/3,
     reply/3,
     stop_server/1,
-    stop_client/1
+    stop_client/1,
+    stop_pool/1
    ]).
 
 -include("tcpcall.hrl").
@@ -28,6 +31,11 @@
     listen_option/0,
     client_options/0,
     client_option/0,
+    client_pool_name/0,
+    client_pool_options/0,
+    client_pool_option/0,
+    peer/0,
+    balancer/0,
     host/0,
     receiver/0,
     bridge_ref/0,
@@ -47,6 +55,19 @@
         {host, RemoteHost :: host()} |
         {port, RemotePort :: inet:port_number()} |
         {name, RegisteredName :: atom()}.
+
+-type client_pool_name() :: atom().
+
+-type client_pool_options() :: [client_pool_option()].
+
+-type client_pool_option() ::
+        {peers, [peer(), ...]} |
+        {balancer, balancer()}.
+
+-type peer() ::
+        {host(), inet:port_number()}.
+
+-type balancer() :: ?round_robin | ?random.
 
 -type host() ::
         inet:hostname() |
@@ -81,6 +102,22 @@ listen(Options) ->
 connect(Options) ->
     tcpcall_client:start_link(Options).
 
+%% @doc Start pool of client connections as part of the
+%% supervision tree.
+%% The pool can be configured as round robin or random
+%% (configurable) load balancer.
+%% Pool name can be used then with tcpcall:call_pool/3
+%% function. The call will be automatically relayed to
+%% the one of started tcpcall clients within the pool.
+%% Note the pool name will be used as registered name
+%% of the process and as a name of named ETS table.
+-spec connect_pool(PoolName :: client_pool_name(),
+                   Options :: client_pool_options()) ->
+                          {ok, Pid :: pid()} | ignore |
+                          {error, Reason :: any()}.
+connect_pool(PoolName, Options) ->
+    tcpcall_pool:start_link(PoolName, Options).
+
 %% @doc Make a Request-Reply interaction with a remote server.
 -spec call(BridgeRef :: bridge_ref(),
            Request :: data(),
@@ -94,6 +131,17 @@ call(BridgeRef, Request, Timeout)
     ok = tcpcall_client:queue_request(
            BridgeRef, self(), RequestRef, DeadLine, Request),
     tcpcall_client:wait_reply(RequestRef, Timeout).
+
+%% @doc Make a Request-Reply interaction with a remote
+%% server through the started connection pool.
+%% See connect_pool/2 function description for more details.
+-spec call_pool(PoolName :: client_pool_name(),
+                Request :: data(),
+                Timeout :: pos_integer()) ->
+                       {ok, Reply :: any()} |
+                       {error, Reason :: any()}.
+call_pool(PoolName, Request, Timeout) ->
+    tcpcall_pool:call(PoolName, Request, Timeout).
 
 %% @doc Reply to a request from a remote side.
 -spec reply(BridgeRef :: bridge_ref(),
@@ -115,6 +163,13 @@ stop_server(BridgeRef) ->
 -spec stop_client(BridgeRef :: bridge_ref()) -> ok.
 stop_client(BridgeRef) ->
     ok = tcpcall_client:stop(BridgeRef).
+
+%% @hidden
+%% @doc Tell the pool process to stop.
+%% It is not a part of public API.
+-spec stop_pool(PoolName :: client_pool_name()) -> ok.
+stop_pool(PoolName) ->
+    ok = tcpcall_pool:stop(PoolName).
 
 %% ----------------------------------------------------------------------
 %% Internal functions
@@ -277,12 +332,149 @@ server_restart_test() ->
     %% to avoid port number reuse in other tests
     ok = timer:sleep(500).
 
+round_robin_pool_test() ->
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2},
+                      {receiver, fun(_) -> term_to_binary(b) end}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001}, {"127.1", 5002}]}]),
+    ok = timer:sleep(500),
+    ?assertMatch({ok, a}, pcall(p1, request, 1000)),
+    ?assertMatch({ok, b}, pcall(p1, request, 1000)),
+    ?assertMatch({ok, a}, pcall(p1, request, 1000)),
+    ?assertMatch({ok, b}, pcall(p1, request, 1000)),
+    %% fetch workers process IDs
+    Workers = tcpcall_pool:workers(p1),
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500),
+    %% check the workers is gone
+    lists:foreach(
+      fun(Worker) ->
+              ?assertNot(is_process_alive(Worker))
+      end, Workers).
+
+round_robin_pool_failover_test() ->
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001},
+                                         {"127.1", 5002},
+                                         %% a bad one:
+                                         {"127.1", 5003}
+                                        ]}]),
+    ok = timer:sleep(500),
+    _Ignored =
+        [?assertMatch({ok, a}, pcall(p1, request, 1000)) ||
+            _ <- lists:seq(1, 1000)],
+    %% fetch workers process IDs
+    Workers = tcpcall_pool:workers(p1),
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500),
+    %% check the workers is gone
+    lists:foreach(
+      fun(Worker) ->
+              ?assertNot(is_process_alive(Worker))
+      end, Workers).
+
+random_pool_test() ->
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1},
+                      {receiver, fun(_) -> term_to_binary($a) end}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2},
+                      {receiver, fun(_) -> term_to_binary($b) end}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001}, {"127.1", 5002}]},
+                                {balancer, ?random}]),
+    ok = timer:sleep(500),
+    Replies =
+        [begin
+             {ok, X} = pcall(p1, request, 1000), X
+         end || _ <- lists:seq(1, 100)],
+    ?assertNotEqual(string:copies("ab", 50), Replies),
+    ?assertMatch("ab", lists:usort(Replies)),
+    %% fetch workers process IDs
+    Workers = tcpcall_pool:workers(p1),
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500),
+    %% check the workers is gone
+    lists:foreach(
+      fun(Worker) ->
+              ?assertNot(is_process_alive(Worker))
+      end, Workers).
+
+random_pool_failover_test() ->
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001},
+                                         {"127.1", 5002},
+                                         %% a bad one:
+                                         {"127.1", 5003}
+                                        ]}]),
+    ok = timer:sleep(500),
+    _Ignored =
+        [?assertMatch({ok, a}, pcall(p1, request, 1000)) ||
+            _ <- lists:seq(1, 1000)],
+    %% fetch workers process IDs
+    Workers = tcpcall_pool:workers(p1),
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500),
+    %% check the workers is gone
+    lists:foreach(
+      fun(Worker) ->
+              ?assertNot(is_process_alive(Worker))
+      end, Workers).
+
 -spec tcall(BridgeRef :: bridge_ref(),
             Request :: any(),
             Timeout :: pos_integer()) ->
                    Reply :: any().
 tcall(BridgeRef, Request, Timeout) ->
     case call(BridgeRef, term_to_binary(Request), Timeout) of
+        {ok, EncodedReply} ->
+            {ok, binary_to_term(EncodedReply)};
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+-spec pcall(PoolName :: client_pool_name(),
+            Request :: any(),
+            Timeout :: pos_integer()) ->
+                   Reply :: any().
+pcall(PoolName, Request, Timeout) ->
+    case call_pool(PoolName, term_to_binary(Request), Timeout) of
         {ok, EncodedReply} ->
             {ok, binary_to_term(EncodedReply)};
         {error, _Reason} = Error ->
