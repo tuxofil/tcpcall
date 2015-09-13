@@ -79,12 +79,12 @@ start_link(Options) ->
                     DeadLine :: pos_integer(),
                     Request :: tcpcall:data()) -> ok.
 queue_request(BridgeRef, From, RequestRef, DeadLine, Request) ->
-    case queue_len(BridgeRef) >= 2000 of
-        true ->
+    case queue_len(BridgeRef) of
+        {ok, QueueLen} when QueueLen >= 2000 ->
             %% the client process message queue is overloaded
             _Sent = self() ! ?ARRIVE_ERROR(RequestRef, overload),
             ok;
-        false ->
+        _ ->
             ok = gen_server:cast(
                    BridgeRef,
                    ?QUEUE_REQUEST(From, RequestRef, DeadLine, Request))
