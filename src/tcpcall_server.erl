@@ -172,7 +172,7 @@ handle_info({'DOWN', MonitorRef, process, AcceptorPid, _Reason}, State)
   when MonitorRef == State#state.acceptor_mon,
        AcceptorPid == State#state.acceptor_pid ->
     %% connection acceptor process is down.
-    {stop, _Reason = normal, State};
+    {stop, _MyReason = normal, State};
 handle_info(_Request, State) ->
     {noreply, State}.
 
