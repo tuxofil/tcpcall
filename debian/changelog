@@ -1,3 +1,9 @@
+erlang-tcpcall (0.3.2) unstable; urgency=low
+
+  * pool: optimize failover
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Thu, 29 Oct 2015 15:39:32 +0200
+
 erlang-tcpcall (0.3.1) unstable; urgency=low
 
   * fix 'badmatch' crash during shutdown;
