@@ -54,7 +54,8 @@
 -type client_option() ::
         {host, RemoteHost :: host()} |
         {port, RemotePort :: inet:port_number()} |
-        {name, RegisteredName :: atom()}.
+        {name, RegisteredName :: atom()} |
+        {lord, pid()}.
 
 -type client_pool_name() :: atom().
 

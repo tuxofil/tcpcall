@@ -35,7 +35,8 @@
    {socket :: port() | undefined,
     options :: tcpcall:client_options(),
     seq_num = 0 :: seq_num(),
-    registry :: registry()
+    registry :: registry(),
+    lord :: pid() | undefined
    }).
 
 %% internal signals
@@ -136,7 +137,8 @@ init(Options) ->
     _Sent = self() ! ?SIG_CONNECT,
     {ok,
      #state{options = Options,
-            registry = Registry}}.
+            registry = Registry,
+            lord = proplists:get_value(lord, Options)}}.
 
 %% @hidden
 -spec handle_info(Request :: any(), State :: #state{}) ->
@@ -150,13 +152,16 @@ handle_info({tcp, Socket, Data}, State)
 handle_info(?SIG_CONNECT, State) ->
     {noreply, connect(State)};
 handle_info(?SIG_STOP, State) ->
+    ok = lord_report(State, false),
     {stop, _Reason = normal, State};
 handle_info({tcp_closed, Socket}, State)
   when Socket == State#state.socket ->
+    ok = lord_report(State, false),
     %% try to reconnect immediately
     {noreply, connect(State)};
 handle_info({tcp_error, Socket, _Reason}, State)
   when Socket == State#state.socket ->
+    ok = lord_report(State, false),
     %% try to reconnect immediately
     {noreply, connect(State)};
 handle_info(_Request, State) ->
@@ -237,6 +242,7 @@ connect(State) ->
         [binary, {packet, 4}, {active, true}, {keepalive, true}],
     case gen_tcp:connect(Host, Port, SocketOptions, ConnTimeout) of
         {ok, Socket} ->
+            ok = lord_report(State, true),
             State#state{socket = Socket,
                         seq_num = 0};
         {error, _Reason} ->
@@ -326,3 +332,12 @@ queue_len(Pid) ->
         undefined ->
             undefined
     end.
+
+%% @doc Send notification to master process with
+%% current connection state.
+-spec lord_report(#state{}, IsConnected :: boolean()) -> ok.
+lord_report(State, IsConnected) when is_pid(State#state.lord) ->
+    _Sent = State#state.lord ! {?MODULE, self(), IsConnected},
+    ok;
+lord_report(_State, _IsConnected) ->
+    ok.

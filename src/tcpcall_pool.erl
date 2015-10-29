@@ -139,11 +139,13 @@ init({PoolName, Options}) ->
                          {noreply, State :: #state{}} |
                          {stop, Reason :: any(), NewState :: #state{}}.
 handle_info(?SIG_SPAWN({Host, Port} = Peer), State) ->
-    case tcpcall:connect([{host, Host}, {port, Port}]) of
+    case tcpcall:connect([{host, Host}, {port, Port}, {lord, self()}]) of
         {ok, Pid} ->
             NewState =
                 State#state{
-                  workers = dict:store(Pid, Peer, State#state.workers)
+                  workers = dict:store(
+                              Pid, {_IsConnected = false, Peer},
+                              State#state.workers)
                  },
             ok = publish_workers(NewState),
             {noreply, NewState};
@@ -153,7 +155,7 @@ handle_info(?SIG_SPAWN({Host, Port} = Peer), State) ->
     end;
 handle_info({'EXIT', From, _Reason}, State) ->
     case dict:find(From, State#state.workers) of
-        {ok, Peer} ->
+        {ok, {_IsConnected, Peer}} ->
             %% One of our workers is died
             ok = schedule_spawn(Peer, 100),
             NewState =
@@ -163,6 +165,23 @@ handle_info({'EXIT', From, _Reason}, State) ->
             ok = publish_workers(NewState),
             {noreply, NewState};
         error ->
+            {noreply, State}
+    end;
+handle_info({tcpcall_client, Pid, IsConnected}, State) ->
+    %% Received connection status notification from worker
+    case dict:find(Pid, State#state.workers) of
+        {ok, {IsConnected, _}} ->
+            %% we already know about it, just ignore
+            {noreply, State};
+        {ok, {_, Peer}} ->
+            %% connection status changed
+            NewWorkers =
+                dict:store(Pid, {IsConnected, Peer}, State#state.workers),
+            NewState = State#state{workers = NewWorkers},
+            ok = publish_workers(NewState),
+            {noreply, NewState};
+        error ->
+            %% notification from unregistered worker, ignore it
             {noreply, State}
     end;
 handle_info(?SIG_STOP, State) ->
@@ -279,10 +298,16 @@ schedule_spawn(Peer, AfterMillis) ->
 %% @doc
 -spec publish_workers(#state{}) -> ok.
 publish_workers(State) ->
+    ConnectedWorkers =
+        dict:fold(
+          fun(Pid, {_Connected = true, _Peer}, Acc) ->
+                  [Pid | Acc];
+             (_, _, Acc) ->
+                  Acc
+          end, [], State#state.workers),
     true = ets:insert(
              State#state.name,
-             {?WORKERS, State#state.balancer,
-              dict:fetch_keys(State#state.workers)}),
+             {?WORKERS, State#state.balancer, ConnectedWorkers}),
     ok.
 
 %% ----------------------------------------------------------------------
