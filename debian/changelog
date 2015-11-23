@@ -1,3 +1,9 @@
+erlang-tcpcall (0.6.0) unstable; urgency=low
+
+  * pool: add {peers, fun(), Period} configuration option
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Mon, 23 Nov 2015 16:56:20 +0200
+
 erlang-tcpcall (0.5.0) unstable; urgency=low
 
   * add reconfig_pool/2 API call
