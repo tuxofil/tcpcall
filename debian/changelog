@@ -1,3 +1,9 @@
+erlang-tcpcall (0.5.0) unstable; urgency=low
+
+  * add reconfig_pool/2 API call
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Mon, 23 Nov 2015 15:13:25 +0200
+
 erlang-tcpcall (0.4.0) unstable; urgency=low
 
   * add is_pool_connected/1 API call
