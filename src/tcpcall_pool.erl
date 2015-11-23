@@ -29,10 +29,17 @@
    state,
    {name :: tcpcall:client_pool_name(),
     options = [] :: tcpcall:client_pool_options(),
+    getter_state :: getter_state(),
     peers = [] :: peers_registry(),
     workers = dict:new() :: workers_registry(),
     balancer = ?round_robin :: tcpcall:balancer()
    }).
+
+-type getter_state() ::
+        {tcpcall:peers_getter(),
+         Seconds :: pos_integer(),
+         TimerRef :: timer:tref()} |
+        undefined.
 
 -type peers_registry() :: [enum_peer()].
 
@@ -48,6 +55,7 @@
 %% Internal signals
 -define(SIG_SPAWN(Peer), {spawn, Peer}).
 -define(SIG_RECONFIG(Options), {reconfig, Options}).
+-define(SIG_GET_PEERS, get_peers).
 
 %% --------------------------------------------------------------------
 %% API functions
@@ -190,6 +198,13 @@ handle_info({tcpcall_client, Pid, IsConnected}, State) ->
             %% notification from unregistered worker, ignore it
             {noreply, State}
     end;
+handle_info(?SIG_GET_PEERS, State) ->
+    case State#state.getter_state of
+        {_GetterFun, _Period, _Reference} ->
+            {noreply, apply_peers(State)};
+        undefined ->
+            {noreply, State}
+    end;
 handle_info(?SIG_STOP, State) ->
     {stop, _Reason = normal, State};
 handle_info(_Request, State) ->
@@ -227,24 +242,67 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %% ----------------------------------------------------------------------
 
-%% @doc
--spec configure(OldState :: #state{},
+%% @doc Reconfigure the pool according to new options.
+-spec configure(State :: #state{},
                 Options :: tcpcall:client_pool_options()) ->
                        NewState :: #state{}.
-configure(OldState, Options) ->
-    OldPeerList = OldState#state.peers,
-    NewPeerList = enumerate(proplists:get_value(peers, Options, [])),
-    State1 = remove_peers(OldState, OldPeerList -- NewPeerList),
+configure(State, Options) ->
+    apply_peers(apply_getter(State#state{options = Options})).
+
+%% @doc Apply new peer list getter function.
+-spec apply_getter(State :: #state{}) ->
+                          NewState :: #state{}.
+apply_getter(State) ->
+    NewPeersGetter =
+        case [{PG, P} || {peers, PG, P} <- State#state.options] of
+            [Elem | _] -> Elem;
+            [] -> undefined
+        end,
+    NewPeersGetterState =
+        case {State#state.getter_state, NewPeersGetter} of
+            {{F, P, _Ref} = PeersGetterState, {F, P}} ->
+                %% configuration not changed
+                PeersGetterState;
+            {{_F, _P, Ref}, {F, P}} ->
+                %% configuration changed. Drop old timer, set up
+                %% new one
+                {ok, cancel} = timer:cancel(Ref),
+                {ok, NewRef} = timer:send_interval(P * 1000, ?SIG_GET_PEERS),
+                {F, P, NewRef};
+            {{_F, _P, Ref}, undefined} ->
+                {ok, cancel} = timer:cancel(Ref),
+                undefined;
+            {_, {F, P}} ->
+                {ok, NewRef} = timer:send_interval(P * 1000, ?SIG_GET_PEERS),
+                {F, P, NewRef};
+            {_, _} ->
+                undefined
+        end,
+    State#state{getter_state = NewPeersGetterState}.
+
+%% @doc Apply new peer list.
+-spec apply_peers(State :: #state{}) -> NewState :: #state{}.
+apply_peers(State) ->
+    Options = State#state.options,
+    OldPeerList = State#state.peers,
+    NewPeerList =
+        enumerate(
+          case State#state.getter_state of
+              {GetterFun, _Period, _Reference} ->
+                  GetterFun();
+              undefined ->
+                  proplists:get_value(peers, Options, [])
+          end),
+    State1 = remove_peers(State, OldPeerList -- NewPeerList),
     State2 = add_peers(State1, NewPeerList -- OldPeerList),
     State3 =
         State2#state{
-          options = Options,
-          balancer = proplists:get_value(balancer, Options, ?round_robin)
-         },
+          balancer = proplists:get_value(balancer, Options, ?round_robin)},
     ok = publish_workers(State3),
     State3.
 
-%% @doc
+%% @doc Helper for the apply_peers/1 fun.
+%% Add new peers to configuration.
 -spec add_peers(State :: #state{}, Peers :: [enum_peer()]) ->
                        NewState :: #state{}.
 add_peers(State, Peers) ->
@@ -254,7 +312,8 @@ add_peers(State, Peers) ->
               Accum#state{peers = [Peer | Accum#state.peers]}
       end, State, Peers).
 
-%% @doc
+%% @doc Helper for the apply_peers/1 fun.
+%% Remove existing peers from configuration.
 -spec remove_peers(State :: #state{}, Peers :: [enum_peer()]) ->
                           NewState :: #state{}.
 remove_peers(State, Peers) ->
@@ -351,13 +410,13 @@ pop_random([_ | _] = List) ->
     {List1, [Elem | List2]} = lists:split(Index - 1, List),
     {Elem, List1 ++ List2}.
 
-%% @doc
+%% @doc Schedule worker respawn.
 -spec schedule_spawn(enum_peer(), AfterMillis :: non_neg_integer()) -> ok.
 schedule_spawn(Peer, AfterMillis) ->
     {ok, _TRef} = timer:send_after(AfterMillis, ?SIG_SPAWN(Peer)),
     ok.
 
-%% @doc
+%% @doc Publish connected workers with shared ETS table.
 -spec publish_workers(#state{}) -> ok.
 publish_workers(State) ->
     ConnectedWorkers =

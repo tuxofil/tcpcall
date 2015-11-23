@@ -37,6 +37,7 @@
     client_pool_options/0,
     client_pool_option/0,
     peer/0,
+    peers_getter/0,
     balancer/0,
     host/0,
     receiver/0,
@@ -64,11 +65,14 @@
 -type client_pool_options() :: [client_pool_option()].
 
 -type client_pool_option() ::
-        {peers, [peer(), ...]} |
+        {peers, [peer()]} |
+        {peers, peers_getter(), Seconds :: pos_integer()} |
         {balancer, balancer()}.
 
 -type peer() ::
         {host(), inet:port_number()}.
+
+-type peers_getter() :: fun(() -> [peer()]).
 
 -type balancer() :: ?round_robin | ?random.
 
@@ -512,6 +516,34 @@ reconfig_pool_test() ->
             _ <- lists:seq(1, 10)],
     true = Sequence2 /= [a, b, a, b, a, b, a, b, a, b]
         andalso Sequence2 /= [b, a, b, a, b, a, b, a, b, a],
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+auto_reconfig_pool_test() ->
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2},
+                      {receiver, fun(_) -> term_to_binary(b) end}]),
+    %% helper cfg table
+    ETS = ets:new(c, []),
+    true = ets:insert(ETS, {k, [{"127.1", 5001}]}),
+    %% Peer list getter function
+    Getter = fun() -> [{k, L}] = ets:lookup(ETS, k), L end,
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, Getter, 1}]),
+    ok = timer:sleep(500),
+    ok = ?assertMatch({ok, a}, pcall(p1, request, 1000)),
+    %% reconfig pool
+    true = ets:insert(ETS, {k, [{"127.1", 5002}]}),
+    ok = timer:sleep(1100),
+    ok = ?assertMatch({ok, b}, pcall(p1, request, 1000)),
     %% stop the bridges
     ok = stop_server(s1),
     ok = stop_server(s2),
