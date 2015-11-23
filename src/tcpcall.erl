@@ -14,6 +14,7 @@
     connect_pool/2,
     call/3,
     call_pool/3,
+    is_pool_connected/1,
     reply/3,
     stop_server/1,
     stop_client/1,
@@ -143,6 +144,13 @@ call(BridgeRef, Request, Timeout)
                        {error, Reason :: any()}.
 call_pool(PoolName, Request, Timeout) ->
     tcpcall_pool:call(PoolName, Request, Timeout).
+
+%% @doc Check if client pool is connected or not.
+%% Return 'true' if at least one of the pool workers is
+%% connected to the remote side.
+-spec is_pool_connected(PoolName :: client_pool_name()) -> boolean().
+is_pool_connected(PoolName) ->
+    tcpcall_pool:workers(PoolName) /= [].
 
 %% @doc Reply to a request from a remote side.
 -spec reply(BridgeRef :: bridge_ref(),
