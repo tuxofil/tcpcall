@@ -15,6 +15,7 @@
     call/3,
     call_pool/3,
     is_pool_connected/1,
+    reconfig_pool/2,
     reply/3,
     stop_server/1,
     stop_client/1,
@@ -151,6 +152,14 @@ call_pool(PoolName, Request, Timeout) ->
 -spec is_pool_connected(PoolName :: client_pool_name()) -> boolean().
 is_pool_connected(PoolName) ->
     tcpcall_pool:workers(PoolName) /= [].
+
+%% @doc Apply new configuration for client pool. You
+%% can provide new peers or remove existing ones, change
+%% balancing strategy.
+-spec reconfig_pool(PoolName :: client_pool_name(),
+                    NewOptions :: client_pool_options()) -> ok.
+reconfig_pool(PoolName, NewOptions) ->
+    tcpcall_pool:reconfig(PoolName, NewOptions).
 
 %% @doc Reply to a request from a remote side.
 -spec reply(BridgeRef :: bridge_ref(),
@@ -465,6 +474,51 @@ random_pool_failover_test() ->
       fun(Worker) ->
               ?assertNot(is_process_alive(Worker))
       end, Workers).
+
+reconfig_pool_test() ->
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1},
+                      {receiver, fun(_) -> term_to_binary(a) end}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2},
+                      {receiver, fun(_) -> term_to_binary(b) end}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001}]}]),
+    ok = timer:sleep(500),
+    ok = ?assertMatch({ok, a}, pcall(p1, request, 1000)),
+    %% reconfig pool
+    ok = reconfig_pool(p1, [{peers, [{"127.1", 5002}]}]),
+    ok = timer:sleep(500),
+    ok = ?assertMatch({ok, b}, pcall(p1, request, 1000)),
+    %% reconfig pool again
+    ok = reconfig_pool(p1, [{peers, []}]),
+    ok = timer:sleep(500),
+    ok = ?assertMatch({error, not_connected}, pcall(p1, request, 1000)),
+    %% ...and again
+    ok = reconfig_pool(p1, [{peers, [{"127.1", 5001}, {"127.1", 5002}]},
+                            {balancer, ?round_robin}]),
+    ok = timer:sleep(500),
+    Sequence1 =
+        [begin {ok, T} = pcall(p1, request, 1000), T end ||
+            _ <- lists:seq(1, 10)],
+    true = Sequence1 == [a, b, a, b, a, b, a, b, a, b]
+        orelse Sequence1 == [b, a, b, a, b, a, b, a, b, a],
+    %% ...and again
+    ok = reconfig_pool(p1, [{peers, [{"127.1", 5001}, {"127.1", 5002}]},
+                            {balancer, ?random}]),
+    ok = timer:sleep(500),
+    Sequence2 =
+        [begin {ok, T} = pcall(p1, request, 1000), T end ||
+            _ <- lists:seq(1, 10)],
+    true = Sequence2 /= [a, b, a, b, a, b, a, b, a, b]
+        andalso Sequence2 /= [b, a, b, a, b, a, b, a, b, a],
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
 
 -spec tcall(BridgeRef :: bridge_ref(),
             Request :: any(),

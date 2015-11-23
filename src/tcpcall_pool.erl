@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API exports
--export([start_link/2, call/3, stop/1, workers/1]).
+-export([start_link/2, call/3, stop/1, workers/1, reconfig/2]).
 
 %% gen_server callback exports
 -export(
@@ -28,13 +28,18 @@
 -record(
    state,
    {name :: tcpcall:client_pool_name(),
-    options :: tcpcall:client_pool_options(),
-    workers :: workers_registry(),
-    balancer :: tcpcall:balancer()
+    options = [] :: tcpcall:client_pool_options(),
+    peers = [] :: peers_registry(),
+    workers = dict:new() :: workers_registry(),
+    balancer = ?round_robin :: tcpcall:balancer()
    }).
 
+-type peers_registry() :: [enum_peer()].
+
+-type enum_peer() :: {pos_integer(), tcpcall:peer()}.
+
 -type workers_registry() ::
-        dict:dict(pid(), tcpcall:peer()).
+        dict:dict(pid(), {IsConnected :: boolean(), enum_peer()}).
 
 %% ETS table keys
 -define(WORKERS, workers).
@@ -42,6 +47,7 @@
 
 %% Internal signals
 -define(SIG_SPAWN(Peer), {spawn, Peer}).
+-define(SIG_RECONFIG(Options), {reconfig, Options}).
 
 %% --------------------------------------------------------------------
 %% API functions
@@ -106,6 +112,12 @@ workers(PoolName) ->
     [{?WORKERS, _Balancer, Workers}] = ets:lookup(PoolName, ?WORKERS),
     Workers.
 
+%% @doc Apply new client pool configuration.
+-spec reconfig(PoolName :: tcpcall:client_pool_name(),
+               NewOptions :: tcpcall:client_pool_options()) -> ok.
+reconfig(PoolName, NewOptions) ->
+    gen_server:cast(PoolName, ?SIG_RECONFIG(NewOptions)).
+
 %% --------------------------------------------------------------------
 %% gen_server callback functions
 %% --------------------------------------------------------------------
@@ -117,40 +129,34 @@ workers(PoolName) ->
 init({PoolName, Options}) ->
     false = process_flag(trap_exit, true),
     PoolName = ets:new(PoolName, [named_table, public]),
-    %% Schedule workers spawn
-    {peers, Peers} = lists:keyfind(peers, 1, Options),
-    _Ignored = [schedule_spawn(Peer, _AfterMillis = 0) || Peer <- Peers],
-    Balancer = proplists:get_value(balancer, Options, ?round_robin),
-    if Balancer == ?round_robin ->
-            %% initialize round robin pointer
-            true = ets:insert(PoolName, {?POINTER, 0});
-       true -> ok
-    end,
-    {ok,
-     #state{
-        name = PoolName,
-        options = Options,
-        workers = dict:new(),
-        balancer = Balancer
-       }}.
+    %% initialize round robin pointer
+    true = ets:insert(PoolName, {?POINTER, 0}),
+    {ok, configure(#state{name = PoolName}, Options)}.
 
 %% @hidden
 -spec handle_info(Request :: any(), State :: #state{}) ->
                          {noreply, State :: #state{}} |
                          {stop, Reason :: any(), NewState :: #state{}}.
-handle_info(?SIG_SPAWN({Host, Port} = Peer), State) ->
-    case tcpcall:connect([{host, Host}, {port, Port}, {lord, self()}]) of
-        {ok, Pid} ->
-            NewState =
-                State#state{
-                  workers = dict:store(
-                              Pid, {_IsConnected = false, Peer},
-                              State#state.workers)
-                 },
-            ok = publish_workers(NewState),
-            {noreply, NewState};
-        _Error ->
-            ok = schedule_spawn(Peer, 1000),
+handle_info(?SIG_SPAWN({_No, {Host, Port}} = Peer), State) ->
+    case lists:member(Peer, State#state.peers) of
+        true ->
+            case tcpcall:connect(
+                   [{host, Host}, {port, Port}, {lord, self()}]) of
+                {ok, Pid} ->
+                    NewState =
+                        State#state{
+                          workers = dict:store(
+                                      Pid, {_IsConnected = false, Peer},
+                                      State#state.workers)
+                         },
+                    ok = publish_workers(NewState),
+                    {noreply, NewState};
+                _Error ->
+                    ok = schedule_spawn(Peer, 1000),
+                    {noreply, State}
+            end;
+        false ->
+            %% Unknown worker ID, ignore it
             {noreply, State}
     end;
 handle_info({'EXIT', From, _Reason}, State) ->
@@ -192,6 +198,8 @@ handle_info(_Request, State) ->
 %% @hidden
 -spec handle_cast(Request :: any(), State :: #state{}) ->
                          {noreply, NewState :: #state{}}.
+handle_cast(?SIG_RECONFIG(Options), State) ->
+    {noreply, configure(State, Options)};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -218,6 +226,64 @@ code_change(_OldVsn, State, _Extra) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 %% ----------------------------------------------------------------------
+
+%% @doc
+-spec configure(OldState :: #state{},
+                Options :: tcpcall:client_pool_options()) ->
+                       NewState :: #state{}.
+configure(OldState, Options) ->
+    OldPeerList = OldState#state.peers,
+    NewPeerList = enumerate(proplists:get_value(peers, Options, [])),
+    State1 = remove_peers(OldState, OldPeerList -- NewPeerList),
+    State2 = add_peers(State1, NewPeerList -- OldPeerList),
+    State3 =
+        State2#state{
+          options = Options,
+          balancer = proplists:get_value(balancer, Options, ?round_robin)
+         },
+    ok = publish_workers(State3),
+    State3.
+
+%% @doc
+-spec add_peers(State :: #state{}, Peers :: [enum_peer()]) ->
+                       NewState :: #state{}.
+add_peers(State, Peers) ->
+    lists:foldl(
+      fun(Peer, Accum) ->
+              _Sent = self() ! ?SIG_SPAWN(Peer),
+              Accum#state{peers = [Peer | Accum#state.peers]}
+      end, State, Peers).
+
+%% @doc
+-spec remove_peers(State :: #state{}, Peers :: [enum_peer()]) ->
+                          NewState :: #state{}.
+remove_peers(State, Peers) ->
+    lists:foldl(
+      fun(Peer, Accum) ->
+              NewWorkers =
+                  dict:filter(
+                    fun(Pid, {_IsConnected, P}) when P == Peer ->
+                            ok = tcpcall_client:stop(Pid),
+                            false;
+                       (_, _) ->
+                            true
+                    end, State#state.workers),
+              Accum#state{
+                peers = State#state.peers -- [Peer],
+                workers = NewWorkers}
+      end, State, Peers).
+
+%% @doc Convert list with non unique elements to list of {No, Term}
+%% where No is number of element within group of equal elements.
+%% For example, [a, a, a, b, c, c] will be converted to
+%% [{1, a}, {2, a}, {3, a}, {1, b}, {2, b}, {1, c}]
+-spec enumerate([any()]) -> [{pos_integer(), any()}].
+enumerate(Terms) ->
+    lists:append(
+      [begin
+           L = [T || T <- Terms, T == Term],
+           lists:zip(lists:seq(1, length(L)), L)
+       end || Term <- lists:usort(Terms)]).
 
 %% @doc Try workers in order according to configured load balancer
 %% type, make failover to the next worker if current one is not
@@ -286,11 +352,7 @@ pop_random([_ | _] = List) ->
     {Elem, List1 ++ List2}.
 
 %% @doc
--spec schedule_spawn(tcpcall:peer(), AfterMillis :: non_neg_integer()) -> ok.
-schedule_spawn(Peer, 0) ->
-    Signal = ?SIG_SPAWN(Peer),
-    Signal = self() ! Signal,
-    ok;
+-spec schedule_spawn(enum_peer(), AfterMillis :: non_neg_integer()) -> ok.
 schedule_spawn(Peer, AfterMillis) ->
     {ok, _TRef} = timer:send_after(AfterMillis, ?SIG_SPAWN(Peer)),
     ok.
@@ -328,5 +390,12 @@ pop_random_test() ->
     ?assertNotMatch(Origin, Shuffled),
     ?assertNotMatch(Origin, lists:reverse(Shuffled)),
     ?assertEqual(lists:sort(Origin), lists:sort(Shuffled)).
+
+enumerate_test_() ->
+    [?_assertMatch([], enumerate([])),
+     ?_assertMatch([{1, a}], enumerate([a])),
+     ?_assertMatch(
+        [{1, a}, {2, a}, {3, a}, {1, b}, {1, c}, {2, c}],
+        enumerate([a, a, a, b, c, c]))].
 
 -endif.
