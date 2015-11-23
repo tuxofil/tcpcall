@@ -1,3 +1,9 @@
+erlang-tcpcall (0.4.0) unstable; urgency=low
+
+  * add is_pool_connected/1 API call
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Mon, 23 Nov 2015 13:06:04 +0200
+
 erlang-tcpcall (0.3.2) unstable; urgency=low
 
   * pool: optimize failover
