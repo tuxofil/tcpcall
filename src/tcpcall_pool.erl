@@ -328,7 +328,7 @@ remove_peers(State, Peers) ->
                             true
                     end, State#state.workers),
               Accum#state{
-                peers = State#state.peers -- [Peer],
+                peers = Accum#state.peers -- [Peer],
                 workers = NewWorkers}
       end, State, Peers).
 
