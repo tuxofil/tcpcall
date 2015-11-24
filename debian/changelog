@@ -1,3 +1,9 @@
+erlang-tcpcall (0.6.1) unstable; urgency=low
+
+  * pool: typo fix
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Tue, 24 Nov 2015 18:38:15 +0200
+
 erlang-tcpcall (0.6.0) unstable; urgency=low
 
   * pool: add {peers, fun(), Period} configuration option
