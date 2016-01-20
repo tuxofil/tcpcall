@@ -3,7 +3,7 @@ Section: devel
 Priority: extra
 Maintainer: Aleksey Morarash <aleksey.morarash@gmail.com>
 Build-Depends: debhelper (>= 8.0.0), erlang-base, erlang-dev, erlang-tools,
- erlang-edoc, dpkg-dev
+ erlang-edoc
 Standards-Version: 3.9.3
 Homepage: https://github.com/tuxofil/erlang-tcpcall
 Vcs-Browser: https://github.com/tuxofil/erlang-tcpcall

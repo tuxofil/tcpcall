@@ -1,6 +1,6 @@
 APP = tcpcall
 
-VERSION = $(shell dpkg-parsechangelog -Sversion -ldebian/changelog)
+VERSION = $(shell awk '{gsub("[()]","",$$2);print$$2;exit}' debian/changelog)
 
 .PHONY: all compile html clean eunit dialyze all-tests
 

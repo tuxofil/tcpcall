@@ -16,7 +16,7 @@ override_dh_auto_test:
 NAME = tcpcall
 DESTDIR = debian/erlang-$(NAME)
 DOC_DESTDIR = debian/erlang-$(NAME)-doc
-VERSION = $(shell dpkg-parsechangelog -Sversion -ldebian/changelog)
+VERSION = $(shell awk '{gsub("[()]","",$$2);print$$2;exit}' debian/changelog)
 ERL_APP_DIR = $(DESTDIR)/usr/lib/erlang/lib/$(NAME)-$(VERSION)
 override_dh_install:
 	install -m 755 -d $(ERL_APP_DIR)/ebin
