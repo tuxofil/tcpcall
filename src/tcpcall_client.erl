@@ -328,7 +328,7 @@ queue_len(Atom) when is_atom(Atom) ->
 queue_len(Pid) ->
     case process_info(Pid, message_queue_len) of
         {message_queue_len, Len} ->
-            Len;
+            {ok, Len};
         undefined ->
             undefined
     end.
