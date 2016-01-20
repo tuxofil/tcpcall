@@ -1,3 +1,15 @@
+erlang-tcpcall (0.6.2) unstable; urgency=low
+
+  * optimize requests when remote side is down
+  * fix return type for tcpcall_client:queue_len/1
+  * run unit tests during package build
+  * makefile: dialyze target fix
+  * remove unused macros
+  * build deps minor fix: remove redundant strict dep
+  * dispose of dpkg-dev build dependency
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 20 Jan 2016 12:55:01 +0200
+
 erlang-tcpcall (0.6.1) unstable; urgency=low
 
   * pool: typo fix
