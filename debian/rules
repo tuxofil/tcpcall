@@ -8,6 +8,7 @@ export DH_OPTIONS
 	dh $@
 
 override_dh_auto_build:
+	$(MAKE) eunit
 	$(MAKE) clean compile html
 
 override_dh_auto_test:

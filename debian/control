@@ -2,7 +2,8 @@ Source: erlang-tcpcall
 Section: devel
 Priority: extra
 Maintainer: Aleksey Morarash <aleksey.morarash@gmail.com>
-Build-Depends: debhelper, erlang-base, erlang-dev, erlang-tools, erlang-edoc
+Build-Depends: debhelper, erlang-base, erlang-dev, erlang-tools, erlang-edoc,
+ erlang-eunit
 Standards-Version: 3.9.3
 Homepage: https://github.com/tuxofil/erlang-tcpcall
 Vcs-Browser: https://github.com/tuxofil/erlang-tcpcall
