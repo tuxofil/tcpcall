@@ -135,9 +135,13 @@ call(BridgeRef, Request, Timeout)
   when is_binary(Request) ->
     RequestRef = make_ref(),
     DeadLine = tcpcall_lib:micros() + Timeout * 1000,
-    ok = tcpcall_client:queue_request(
-           BridgeRef, self(), RequestRef, DeadLine, Request),
-    tcpcall_client:wait_reply(RequestRef, Timeout).
+    case tcpcall_client:queue_request(
+           BridgeRef, self(), RequestRef, DeadLine, Request) of
+        ok ->
+            tcpcall_client:wait_reply(RequestRef, Timeout);
+        {error, _Reason} = Error ->
+            Error
+    end.
 
 %% @doc Make a Request-Reply interaction with a remote
 %% server through the started connection pool.

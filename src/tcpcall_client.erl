@@ -78,17 +78,18 @@ start_link(Options) ->
                     From :: pid(),
                     RequestRef :: reference(),
                     DeadLine :: pos_integer(),
-                    Request :: tcpcall:data()) -> ok.
+                    Request :: tcpcall:data()) ->
+                           ok | {error, overload | notalive}.
 queue_request(BridgeRef, From, RequestRef, DeadLine, Request) ->
     case queue_len(BridgeRef) of
         {ok, QueueLen} when QueueLen >= 2000 ->
-            %% the client process message queue is overloaded
-            _Sent = self() ! ?ARRIVE_ERROR(RequestRef, overload),
-            ok;
-        _ ->
-            ok = gen_server:cast(
-                   BridgeRef,
-                   ?QUEUE_REQUEST(From, RequestRef, DeadLine, Request))
+            {error, overload};
+        {ok, _QueueLen} ->
+            gen_server:cast(
+              BridgeRef,
+              ?QUEUE_REQUEST(From, RequestRef, DeadLine, Request));
+        undefined ->
+            {error, notalive}
     end.
 
 %% @doc Waits for reply from the remote side server.
