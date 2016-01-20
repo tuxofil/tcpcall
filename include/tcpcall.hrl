@@ -15,20 +15,6 @@
 -define(random, random).
 
 %% ----------------------------------------------------------------------
-%% debugging
-
--ifdef(TRACE).
--define(
-   trace(Format, Args),
-   ok = io:format(
-          "TRACE> mod:~w; line:~w; pid:~w; msg:" ++ Format ++ "~n",
-          [?MODULE, ?LINE, self() | Args]
-         )).
--else.
--define(trace(F, A), ok).
--endif.
-
-%% ----------------------------------------------------------------------
 %% eunit
 
 -ifdef(TEST).
