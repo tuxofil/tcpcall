@@ -11,6 +11,7 @@
 -export(
    [listen/1,
     connect/1,
+    is_connected/1,
     connect_pool/2,
     call/3,
     call_pool/3,
@@ -108,6 +109,11 @@ listen(Options) ->
                      {error, Reason :: any()}.
 connect(Options) ->
     tcpcall_client:start_link(Options).
+
+%% @doc Check if client is connected or not.
+-spec is_connected(BridgeRef :: bridge_ref()) -> boolean().
+is_connected(BridgeRef) ->
+    tcpcall_client:is_connected(BridgeRef).
 
 %% @doc Start pool of client connections as part of the
 %% supervision tree.
@@ -555,6 +561,21 @@ auto_reconfig_pool_test() ->
     ok = stop_pool(p1),
     %% to avoid port number reuse in other tests
     ok = timer:sleep(500).
+
+is_connected_test() ->
+    %% start the client
+    {ok, _} = connect([{host, "127.1"}, {port, 5000}, {name, c}]),
+    ok = timer:sleep(500),
+    ?assertNot(is_connected(c)),
+    %% start the server
+    {ok, _} = listen([{bind_port, 5000}, {name, s},
+                      {receiver, fun(_) -> <<>> end}]),
+    ok = timer:sleep(500),
+    ?assert(is_connected(c)),
+    %% stop the server
+    ok = stop_server(s),
+    ok = timer:sleep(500),
+    ?assertNot(is_connected(c)).
 
 -spec tcall(BridgeRef :: bridge_ref(),
             Request :: any(),

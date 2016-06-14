@@ -14,6 +14,7 @@
    [start_link/1,
     queue_request/5,
     wait_reply/2,
+    is_connected/1,
     stop/1
    ]).
 
@@ -58,6 +59,10 @@
 %% from remote side server.
 -define(ARRIVE_ERROR(RequestRef, EncodedReason),
         {arrive_error, RequestRef, EncodedReason}).
+
+%% --------------------------------------------------------------------
+%% other definitions
+-define(CONNECTED_FLAG, connected).
 
 %% --------------------------------------------------------------------
 %% API functions
@@ -108,6 +113,28 @@ wait_reply(RequestRef, Timeout) ->
             {error, Reason}
     after Timeout ->
             {error, timeout}
+    end.
+
+%% @doc Return 'true' if connected to the server.
+-spec is_connected(BridgeRef :: tcpcall:bridge_ref()) -> boolean().
+is_connected(BridgeRef) ->
+    %% It was done in such non-usual manner to not block this
+    %% request if the process is busy by network transfers.
+    Pid =
+        if is_atom(BridgeRef) ->
+                whereis(BridgeRef);
+           true ->
+                BridgeRef
+        end,
+    if is_pid(Pid) ->
+            case process_info(Pid, dictionary) of
+                {dictionary, List} ->
+                    lists:keyfind(?CONNECTED_FLAG, 1, List) /= false;
+                undefined ->
+                    false
+            end;
+       true ->
+            false
     end.
 
 %% @doc Tell the acceptor process to stop.
@@ -232,6 +259,7 @@ connect(State) ->
        true ->
             ok
     end,
+    _OldConnectedFlag = erase(?CONNECTED_FLAG),
     %% the function is called only in 'client' mode, so
     %% clear the registry
     ok = clear_client_registry(State#state.registry),
@@ -243,6 +271,7 @@ connect(State) ->
         [binary, {packet, 4}, {active, true}, {keepalive, true}],
     case gen_tcp:connect(Host, Port, SocketOptions, ConnTimeout) of
         {ok, Socket} ->
+            undefined = put(?CONNECTED_FLAG, true),
             ok = lord_report(State, true),
             State#state{socket = Socket,
                         seq_num = 0};
