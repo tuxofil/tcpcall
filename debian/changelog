@@ -1,3 +1,9 @@
+erlang-tcpcall (0.7.0) unstable; urgency=low
+
+  * add is_connected/1 API call
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Tue, 14 Jun 2016 12:56:58 +0300
+
 erlang-tcpcall (0.6.2) unstable; urgency=low
 
   * optimize requests when remote side is down
