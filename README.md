@@ -371,3 +371,17 @@ ok = tcpcall:suspend(ServerPidOrName, Millis),
 ```
 
 Appropriate signal will be sent to all connected clients.
+
+### Flow control in connection pools
+
+It's even easier than with bare tcpcall connections. There is nothing to do
+on the client side, just create connection pool as usual.
+
+When one of your servers decides to call tcpcall:suspend/2, the pool receives
+this signal and removes that server from load balancing for requested period
+of time. When suspend period expires, server will be added to the load balancing
+again automatically.
+
+When you try to send to much data and all servers go to suspend mode, all
+tcpcall:call_pool/3 and tcpcall:cast_pool/2 requests will return {error, not_connected},
+informing caller to retry send later.
