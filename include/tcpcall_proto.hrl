@@ -12,6 +12,7 @@
 -define(REQUEST, 0).
 -define(REPLY, 1).
 -define(ERROR, 2).
+-define(CAST, 3).
 
 %% packet formats
 -define(
@@ -32,5 +33,11 @@
    <<?ERROR:8/big-unsigned,
      SeqNum:32/big-unsigned,
      Reason/binary>>).
+
+-define(
+   PACKET_CAST(SeqNum, Request),
+   <<?CAST:8/big-unsigned,
+     SeqNum:32/big-unsigned,
+     Request/binary>>).
 
 -endif.

@@ -13,7 +13,9 @@
 -export(
    [start_link/1,
     queue_request/5,
+    queue_cast/4,
     wait_reply/2,
+    wait_cast_ack/1,
     is_connected/1,
     stop/1
    ]).
@@ -60,6 +62,18 @@
 -define(ARRIVE_ERROR(RequestRef, EncodedReason),
         {arrive_error, RequestRef, EncodedReason}).
 
+%% sent when a local Erlang process calls tcpcall:cast/2
+-define(QUEUE_CAST(From, RequestRef, Request),
+        {queue_cast, From, RequestRef, Request}).
+
+%% message with cast acknowledge to a local Erlang process.
+-define(CAST_ACK(RequestRef),
+        {cast_ack, RequestRef}).
+
+%% message with cast deny to a local Erlang process.
+-define(CAST_ERROR(RequestRef, Reason),
+        {cast_error, RequestRef, Reason}).
+
 %% --------------------------------------------------------------------
 %% other definitions
 -define(CONNECTED_FLAG, connected).
@@ -97,6 +111,24 @@ queue_request(BridgeRef, From, RequestRef, DeadLine, Request) ->
             {error, notalive}
     end.
 
+%% @doc Enqueue an asynchronous request (without a response)
+%% for transferring to the remote side.
+-spec queue_cast(BridgeRef :: tcpcall:bridge_ref(),
+                 From :: pid(),
+                 RequestRef :: reference(),
+                 Request :: tcpcall:data()) ->
+                        ok | {error, overload | notalive}.
+queue_cast(BridgeRef, From, RequestRef, Request) ->
+    case queue_len(BridgeRef) of
+        {ok, QueueLen} when QueueLen >= 2000 ->
+            {error, overload};
+        {ok, _QueueLen} ->
+            _Sent = BridgeRef ! ?QUEUE_CAST(From, RequestRef, Request),
+            ok;
+        undefined ->
+            {error, notalive}
+    end.
+
 %% @doc Waits for reply from the remote side server.
 -spec wait_reply(RequestRef :: reference(),
                  Timeout :: pos_integer()) ->
@@ -112,6 +144,20 @@ wait_reply(RequestRef, Timeout) ->
         ?ARRIVE_ERROR(RequestRef, Reason) ->
             {error, Reason}
     after Timeout ->
+            {error, timeout}
+    end.
+
+%% @doc Waits for cast acknowledge from socket. 'ok' means
+%% the cast was sent to the server side.
+-spec wait_cast_ack(RequestRef :: reference()) ->
+                           ok | {error, Reason :: any()}.
+wait_cast_ack(RequestRef) ->
+    receive
+        ?CAST_ACK(RequestRef) ->
+            ok;
+        ?CAST_ERROR(RequestRef, Reason) ->
+            {error, Reason}
+    after 5000 ->
             {error, timeout}
     end.
 
@@ -172,6 +218,31 @@ init(Options) ->
 -spec handle_info(Request :: any(), State :: #state{}) ->
                          {noreply, State :: #state{}} |
                          {stop, Reason :: any(), NewState :: #state{}}.
+handle_info(?QUEUE_CAST(From, RequestRef, Request), State)
+  when State#state.socket /= undefined ->
+    %% Received an asynchronous request from a local Erlang process
+    SeqNum =
+        if State#state.seq_num > ?MAX_SEQ_NUM ->
+                0;
+           true ->
+                State#state.seq_num
+        end,
+    case gen_tcp:send(
+           State#state.socket,
+           ?PACKET_CAST(SeqNum, Request)) of
+        ok ->
+            _Sent = From ! ?CAST_ACK(RequestRef),
+            {noreply, State#state{seq_num = SeqNum + 1}};
+        {error, Reason} ->
+            %% Failed to send. Reply to the local process
+            %% immediately and try to reconnect.
+            _Sent = From ! ?CAST_ERROR(RequestRef, Reason),
+            {noreply, connect(State)}
+    end;
+handle_info(?QUEUE_CAST(From, RequestRef, _Request), State) ->
+    %% not connected. Reply to the caller immediately.
+    _Sent = From ! ?CAST_ERROR(RequestRef, not_connected),
+    {noreply, State};
 handle_info({tcp, Socket, Data}, State)
   when Socket == State#state.socket ->
     %% process data from the socket only when connected

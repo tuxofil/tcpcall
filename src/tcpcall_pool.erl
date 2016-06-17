@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API exports
--export([start_link/2, call/3, stop/1, workers/1, reconfig/2]).
+-export([start_link/2, call/3, cast/2, stop/1, workers/1, reconfig/2]).
 
 %% gen_server callback exports
 -export(
@@ -104,6 +104,39 @@ call(PoolName, Request, Timeout) ->
             call_loop(Balancer, Workers2, Request, Timeout);
         [{?WORKERS, ?random = Balancer, [_ | _] = Workers}] ->
             call_loop(Balancer, Workers, Request, Timeout);
+        _ ->
+            {error, not_connected}
+    end.
+
+%% @doc Make an asynchronous (without a response) interaction with a remote
+%% server through the started connection pool.
+%% See tcpcall:connect_pool/2 function description for more details.
+-spec cast(PoolName :: tcpcall:client_pool_name(), Request :: tcpcall:data()) ->
+                  ok | {error, Reason :: any()}.
+cast(PoolName, Request) ->
+    case ets:lookup(PoolName, ?WORKERS) of
+        [{?WORKERS, _Balancer, [Worker]}] ->
+            %% there is only one worker, so make the cast
+            %% without any balancing and failover
+            tcpcall:cast(Worker, Request);
+        [{?WORKERS, ?round_robin = Balancer, [_ | _] = Workers}] ->
+            UpdateOp =
+                {_Position = 2, _Increment = 1,
+                 _Threshold = length(Workers), _SetValue = 1},
+            Index = ets:update_counter(PoolName, ?POINTER, UpdateOp),
+            Workers2 =
+                if Index > 1 ->
+                        %% Reorder worker list such way if the element,
+                        %% indexed by the pointer is the very first element
+                        %% of the worker list.
+                        {L1, L2} = lists:split(Index - 1, Workers),
+                        L2 ++ L1;
+                   true ->
+                        Workers
+                end,
+            cast_loop(Balancer, Workers2, Request);
+        [{?WORKERS, ?random = Balancer, [_ | _] = Workers}] ->
+            cast_loop(Balancer, Workers, Request);
         _ ->
             {error, not_connected}
     end.
@@ -347,6 +380,7 @@ enumerate(Terms) ->
 %% @doc Try workers in order according to configured load balancer
 %% type, make failover to the next worker if current one is not
 %% connected or overloaded.
+%% Helper for the call/3 API function.
 -spec call_loop(BalancerType :: tcpcall:balancer(),
                 Workers :: [pid()],
                 Request :: tcpcall:data(),
@@ -389,6 +423,54 @@ call_loop(?round_robin = Balancer, [Worker | Tail], Request, Timeout) ->
             OverloadError;
         {error, not_connected} ->
             call_loop(Balancer, Tail, Request, Timeout);
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+%% @doc Try workers in order according to configured load balancer
+%% type, make failover to the next worker if current one is not
+%% connected or overloaded.
+%% Helper for the cast/2 API function.
+-spec cast_loop(BalancerType :: tcpcall:balancer(),
+                Workers :: [pid()],
+                Request :: tcpcall:data()) ->
+                       ok | {error, Reason :: any()}.
+cast_loop(_Balancer, [], _Request) ->
+    {error, not_connected};
+cast_loop(_Balancer, [Worker], Request) ->
+    tcpcall:cast(Worker, Request);
+cast_loop(?random = Balancer, Workers, Request) ->
+    %% There is two ways to implement failover using
+    %% random workers: 1. shuffle the whole worker list before
+    %% traversing; 2. pop random element on each try.
+    %% I've selected latter because failover is not a usual
+    %% case, so it is better to play with pop/join as less
+    %% as possible.
+    {Worker, Tail} = pop_random(Workers),
+    case tcpcall:cast(Worker, Request) of
+        ok ->
+            ok;
+        {error, overload} when Tail /= [] ->
+            cast_loop(Balancer, Tail, Request);
+        {error, overload} = OverloadError ->
+            %% raise overload error up to the caller
+            OverloadError;
+        {error, not_connected} ->
+            cast_loop(Balancer, Tail, Request);
+        {error, _Reason} = Error ->
+            Error
+    end;
+cast_loop(?round_robin = Balancer, [Worker | Tail], Request) ->
+    case tcpcall:cast(Worker, Request) of
+        ok ->
+            ok;
+        {error, overload} when Tail /= [] ->
+            cast_loop(Balancer, Tail, Request);
+        {error, overload} = OverloadError ->
+            %% raise overload error up to the caller
+            OverloadError;
+        {error, not_connected} ->
+            cast_loop(Balancer, Tail, Request);
         {error, _Reason} = Error ->
             Error
     end.

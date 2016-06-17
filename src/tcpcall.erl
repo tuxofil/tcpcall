@@ -15,6 +15,8 @@
     connect_pool/2,
     call/3,
     call_pool/3,
+    cast/2,
+    cast_pool/2,
     is_pool_connected/1,
     reconfig_pool/2,
     reply/3,
@@ -160,6 +162,28 @@ call(BridgeRef, Request, Timeout)
 call_pool(PoolName, Request, Timeout) ->
     tcpcall_pool:call(PoolName, Request, Timeout).
 
+%% @doc Make a asynchronous request with a remote server
+%% without waiting for a response.
+-spec cast(BridgeRef :: bridge_ref(), Request :: data()) ->
+                  ok | {error, Reason :: any()}.
+cast(BridgeRef, Request) when is_binary(Request) ->
+    RequestRef = make_ref(),
+    case tcpcall_client:queue_cast(
+           BridgeRef, self(), RequestRef, Request) of
+        ok ->
+            tcpcall_client:wait_cast_ack(RequestRef);
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+%% @doc Make an asynchronous (without a respone) interaction with a remote
+%% server through the started connection pool.
+%% See connect_pool/2 function description for more details.
+-spec cast_pool(PoolName :: client_pool_name(), Request :: data()) ->
+                       ok | {error, Reason :: any()}.
+cast_pool(PoolName, Request) ->
+    tcpcall_pool:cast(PoolName, Request).
+
 %% @doc Check if client pool is connected or not.
 %% Return 'true' if at least one of the pool workers is
 %% connected to the remote side.
@@ -239,6 +263,26 @@ msg_psng_test() ->
             ok
     after 3000 ->
             throw(timeout_waiting_for_caller)
+    end,
+    %% stop the bridge
+    ok = stop_server(s),
+    ok = stop_client(c),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+cast_passing_test() ->
+    %% start the bridge
+    {ok, _} = listen([{bind_port, 5000}, {receiver, self()}, {name, s}]),
+    {ok, _} = connect([{host, "127.1"}, {port, 5000}, {name, c}]),
+    ok = timer:sleep(500),
+    %% spawn the caller process
+    ?assertMatch(ok, tcast(c, 5)),
+    %% awaiting for the request
+    receive
+        {tcpcall_cast, _BridgeRef, EncodedRequest} ->
+            ?assertMatch(5, binary_to_term(EncodedRequest))
+    after 3000 ->
+            throw({no_request_from_client})
     end,
     %% stop the bridge
     ok = stop_server(s),
@@ -393,6 +437,47 @@ round_robin_pool_test() ->
               ?assertNot(is_process_alive(Worker))
       end, Workers).
 
+round_robin_pool_cast_test() ->
+    ServerProcessor = fun() -> receive stop -> ok end end,
+    S1 = spawn_link(ServerProcessor),
+    S2 = spawn_link(ServerProcessor),
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1}, {receiver, S1}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2}, {receiver, S2}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001}, {"127.1", 5002}]}]),
+    ok = timer:sleep(500),
+    ?assertMatch(ok, cast_pool(p1, <<"1">>)),
+    ?assertMatch(ok, cast_pool(p1, <<"2">>)),
+    ?assertMatch(ok, cast_pool(p1, <<"3">>)),
+    ?assertMatch(ok, cast_pool(p1, <<"4">>)),
+    ok = timer:sleep(500),
+    %% test mailboxes of server processors
+    ?assertMatch({messages, [{tcpcall_cast, _, <<"1">>},
+                             {tcpcall_cast, _, <<"3">>}]},
+                 process_info(S1, messages)),
+    ?assertMatch({messages, [{tcpcall_cast, _, <<"2">>},
+                             {tcpcall_cast, _, <<"4">>}]},
+                 process_info(S2, messages)),
+    %% stop server processors
+    stop = S1 ! stop,
+    stop = S2 ! stop,
+    %% fetch workers process IDs
+    Workers = tcpcall_pool:workers(p1),
+    %% stop the bridges
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500),
+    %% check the workers is gone
+    lists:foreach(
+      fun(Worker) ->
+              ?assertNot(is_process_alive(Worker))
+      end, Workers).
+
 round_robin_pool_failover_test() ->
     %% start the bridge #1
     {ok, _} = listen([{bind_port, 5001}, {name, s1},
@@ -414,6 +499,48 @@ round_robin_pool_failover_test() ->
     Workers = tcpcall_pool:workers(p1),
     %% stop the bridges
     ok = stop_server(s1),
+    ok = stop_server(s2),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500),
+    %% check the workers is gone
+    lists:foreach(
+      fun(Worker) ->
+              ?assertNot(is_process_alive(Worker))
+      end, Workers).
+
+round_robin_pool_cast_failover_test() ->
+    ServerProcessor = fun() -> receive stop -> ok end end,
+    S1 = spawn_link(ServerProcessor),
+    S2 = spawn_link(ServerProcessor),
+    %% start the bridge #1
+    {ok, _} = listen([{bind_port, 5001}, {name, s1}, {receiver, S1}]),
+    %% start the bridge #2
+    {ok, _} = listen([{bind_port, 5002}, {name, s2}, {receiver, S2}]),
+    %% start the pool
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001},
+                                         {"127.1", 5002},
+                                         %% a bad one:
+                                         {"127.1", 5003}
+                                        ]}]),
+    ok = timer:sleep(500),
+    [?assertMatch(ok, pcast(p1, request)) || _ <- lists:seq(1, 100)],
+    ok = timer:sleep(500),
+    %% stop one of the servers and send more data
+    ok = stop_server(s1),
+    ok = timer:sleep(500),
+    [?assertMatch(ok, pcast(p1, request)) || _ <- lists:seq(1, 100)],
+    ok = timer:sleep(500),
+    %% test server processors mailboxes
+    ?assertMatch({message_queue_len, 50},  process_info(S1, message_queue_len)),
+    ?assertMatch({message_queue_len, 150}, process_info(S2, message_queue_len)),
+    %% stop server processors
+    stop = S1 ! stop,
+    stop = S2 ! stop,
+    %% fetch workers process IDs
+    Workers = tcpcall_pool:workers(p1),
+    %% stop the bridges
     ok = stop_server(s2),
     %% stop the pool
     ok = stop_pool(p1),
@@ -600,5 +727,15 @@ pcall(PoolName, Request, Timeout) ->
         {error, _Reason} = Error ->
             Error
     end.
+
+-spec tcast(BridgeRef :: bridge_ref(), Request :: any()) ->
+                   ok | {error, Reason :: any()}.
+tcast(BridgeRef, Request) ->
+    cast(BridgeRef, term_to_binary(Request)).
+
+-spec pcast(PoolName :: client_pool_name(), Request :: any()) ->
+                   ok | {error, Reason :: any()}.
+pcast(PoolName, Request) ->
+    cast_pool(PoolName, term_to_binary(Request)).
 
 -endif.

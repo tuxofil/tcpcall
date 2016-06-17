@@ -67,6 +67,11 @@
 -define(ARRIVE_REQUEST(BridgeRef, RequestRef, Request),
         {tcpcall_req, BridgeRef, RequestRef, Request}).
 
+%% message with asynchronous request (without a response) to a local
+%% receiver process (on the server side)
+-define(ARRIVE_CAST(BridgeRef, Request),
+        {tcpcall_cast, BridgeRef, Request}).
+
 %% sent when the receiver process prepare a reply
 -define(QUEUE_REPLY(RequestRef, Reply),
         {queue_reply, RequestRef, Reply}).
@@ -269,6 +274,9 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
                     stop
             end
     end;
+handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
+    %% relay the cast to the receiver process
+    deliver_cast(State#state.receiver, Request);
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
     ok.
@@ -327,6 +335,36 @@ deliver_request(FunObject, RequestRef, Request)
                               {stacktrace,
                                erlang:get_stacktrace()}]})
                   end
+          end),
+    ok.
+
+%% @doc Deliver cast (asynchronous request without a response) received
+%% from the remote side (the client) to the local receiver process.
+-spec deliver_cast(Receiver :: tcpcall:receiver(), Request :: tcpcall:data()) -> ok.
+deliver_cast(ReceiverName, Request)
+  when is_atom(ReceiverName) ->
+    case whereis(ReceiverName) of
+        Pid when is_pid(Pid) ->
+            deliver_cast(Pid, Request);
+        undefined ->
+            ok
+    end;
+deliver_cast(Pid, Request) when is_pid(Pid) ->
+    ServerPid = self(),
+    case is_process_alive(Pid) of
+        true ->
+            _Sent = Pid ! ?ARRIVE_CAST(ServerPid, Request),
+            ok;
+        false ->
+            ok
+    end;
+deliver_cast(FunObject, Request)
+  when is_function(FunObject, 1) ->
+    _Pid =
+        spawn_link(
+          fun() ->
+                  _Ignored = (catch FunObject(Request)),
+                  ok
           end),
     ok.
 
