@@ -580,7 +580,7 @@ is_connected_test() ->
 -spec tcall(BridgeRef :: bridge_ref(),
             Request :: any(),
             Timeout :: pos_integer()) ->
-                   Reply :: any().
+                   {ok, Reply :: any()} | {error, Reason :: any()}.
 tcall(BridgeRef, Request, Timeout) ->
     case call(BridgeRef, term_to_binary(Request), Timeout) of
         {ok, EncodedReply} ->
@@ -592,7 +592,7 @@ tcall(BridgeRef, Request, Timeout) ->
 -spec pcall(PoolName :: client_pool_name(),
             Request :: any(),
             Timeout :: pos_integer()) ->
-                   Reply :: any().
+                   {ok, Reply :: any()} | {error, Reason :: any()}.
 pcall(PoolName, Request, Timeout) ->
     case call_pool(PoolName, term_to_binary(Request), Timeout) of
         {ok, EncodedReply} ->
