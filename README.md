@@ -23,6 +23,16 @@ process which will receive special messages or as a functional
 object, which will be applied in a new Erlang process each
 time when new request arrives.
 
+Communication between client and server implemented in such
+way to not block until reply from the server will arrive.
+You can use same tcpcall connection from many Erlang processes
+simultaneously - all requests will be multiplexed on the
+client side before sending them to the server. All server
+replies will be demultiplexed and sent back to appropriate
+caller processes. This is the thing which differs tcpcall
+from ØMQ REQ-REP. Latter will fail when you try to send
+two simultaneous requests to the socket, but tcpcall will not.
+
 The client side part does automatic reconnect when TCP connection
 closed from the another side. The time until client will
 reconnect to the server all calls to tcpcall:call/3 and
