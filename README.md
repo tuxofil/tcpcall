@@ -7,7 +7,7 @@ Provides an API to make Request-Reply and Request-only
 TCP/IP network protocol.
 
 The bridge does not any encoding/decoding of the payload
-data and assumes request and reply is given as binaries.
+data and assumes request and reply are given as binaries.
 This is done to reduce memory copies of a potentially big
 Erlang terms between processes.
 
