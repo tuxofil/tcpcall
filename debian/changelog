@@ -1,3 +1,18 @@
+erlang-tcpcall (0.8.0) unstable; urgency=low
+
+  * pool: honor suspend requests from servers
+  * implement flow control: server-side suspend API call
+  * readme: minor improve pools section
+  * readme: examples for using connection pools
+  * readme: examples for starting tcpcall within supervision tree
+  * readme: markdown style minor fix
+  * readme: add note about requests multiplexing
+  * readme: grammar fix
+  * introduce responseless requests (casts)
+  * non functional: spec fix
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Fri, 17 Jun 2016 16:38:05 +0300
+
 erlang-tcpcall (0.7.0) unstable; urgency=low
 
   * add is_connected/1 API call
