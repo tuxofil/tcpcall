@@ -238,7 +238,8 @@ Lets try to start the pool:
 {ok, _Pid} =
     tcpcall:connect_pool(
         my_pool,
-        [{peers, [{"10.0.0.1", 5001},
+        [{balancer, round_robin},
+         {peers, [{"10.0.0.1", 5001},
                   {"10.0.0.2", 5002},
                   {"10.0.0.3", 5003}]}]),
 ```
@@ -287,7 +288,8 @@ And even reconfigure the pool manually, adding and removing servers:
 ```
 ...
 NewPoolOptions =
-    [{peers, [{"10.0.0.1", 5001},
+    [{balancer, random},
+     {peers, [{"10.0.0.1", 5001},
               {"10.0.0.3", 5003},
               {"10.0.0.4", 5003},
               {"10.0.0.5", 5003}
