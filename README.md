@@ -119,3 +119,89 @@ ok = tcpcall:cast(Pid, EncodedCast),
 Note when you use functional object for processing casts (asynchronous
 requests without a response), return of the function will be silently
 discarded.
+
+## Client and server as part of the supervision tree
+
+Here is example for starting tcpcall server as part of the supervision tree of
+your Erlang application:
+
+```
+%% @hidden
+%% @doc Callback for application supervisor.
+init(_Args) ->
+    {ok, {
+       {one_for_one, 5, 1},
+       [
+        ...
+        {tcpcall_server,
+         {tcpcall, listen, [[{name, my_server},
+                             {bind_port, 5001},
+                             {receiver, fun mymod:process_request/1}
+                            ]]},
+         permanent, brutal_kill, worker, [tcpcall]},
+        ...
+       ]
+      }}.
+```
+
+Here is example for starting tcpcall client as part of the supervision tree of
+your Erlang application:
+
+```
+%% @hidden
+%% @doc Callback for application supervisor.
+init(_Args) ->
+    {ok, {
+       {one_for_one, 5, 1},
+       [
+        ...
+        {tcpcall_client,
+         {tcpcall, connect, [[{name, my_client}, {host, "10.0.0.1"}, {port, 5001}]]},
+         permanent, brutal_kill, worker, [tcpcall]},
+        ...
+       ]
+      }}.
+```
+
+Now you can use tcpcall client from any process of your application like:
+
+```
+...
+case tcpcall:call(my_client, Request, Timeout) of
+    {ok, Reply} ->
+        ...;
+    {error, timeout} ->
+        %% remote side doesn't respond within timeout
+        ...;
+    {error, overload} ->
+        %% tcpcall client overloaded with incoming requests
+        ...;
+    {error, not_connected} ->
+        %% connection to server is not alive
+        ...
+    {error, OtherError} ->
+        %% something bad happen (network error or remote request processor crashed)
+        ...
+end,
+...
+```
+
+or send casts like:
+
+```
+...
+case tcpcall:cast(my_client, Request) of
+    ok ->
+        ...;
+    {error, overload} ->
+        %% tcpcall client overloaded with incoming requests
+        ...;
+    {error, not_connected} ->
+        %% connection to server is not alive
+        ...
+    {error, OtherError} ->
+        %% something bad happen (network error)
+        ...
+end,
+...
+```
