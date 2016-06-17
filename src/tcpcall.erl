@@ -20,6 +20,7 @@
     is_pool_connected/1,
     reconfig_pool/2,
     reply/3,
+    suspend/2,
     stop_server/1,
     stop_client/1,
     stop_pool/1
@@ -44,6 +45,7 @@
     balancer/0,
     host/0,
     receiver/0,
+    suspend_handler/0,
     bridge_ref/0,
     data/0
    ]).
@@ -61,6 +63,7 @@
         {host, RemoteHost :: host()} |
         {port, RemotePort :: inet:port_number()} |
         {name, RegisteredName :: atom()} |
+        {suspend_handler, suspend_handler()} |
         {lord, pid()}.
 
 -type client_pool_name() :: atom().
@@ -87,6 +90,11 @@
         (RegisteredName :: atom()) |
         pid() |
         fun((Request :: data()) -> Reply :: data()).
+
+-type suspend_handler() ::
+        (RegisteredName :: atom()) |
+        pid() |
+        fun((Millis :: non_neg_integer()) -> any()).
 
 -type bridge_ref() ::
         (BridgeRegisteredName :: atom()) |
@@ -205,6 +213,15 @@ reconfig_pool(PoolName, NewOptions) ->
             Reply :: data()) -> ok.
 reply(BridgeRef, RequestRef, Reply) when is_binary(Reply) ->
     ok = tcpcall_server:queue_reply(BridgeRef, RequestRef, Reply).
+
+%% @doc Ask all connected clients to not sent new data for a few time.
+%% Called from the server side.
+-spec suspend(BridgeRef :: bridge_ref(), Millis :: non_neg_integer()) -> ok.
+suspend(BridgeRef, Millis) ->
+    lists:foreach(
+      fun(PID) ->
+              ok = tcpcall_server:suspend(PID, Millis)
+      end, tcpcall_acceptor:clients(BridgeRef)).
 
 %% @hidden
 %% @doc Tell the server process to stop.
@@ -686,6 +703,33 @@ auto_reconfig_pool_test() ->
     ok = stop_server(s2),
     %% stop the pool
     ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+suspend_test() ->
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {suspend_handler, self()}]),
+    ok = timer:sleep(500),
+    ?assert(is_connected(C1)),
+    ?assertMatch([_], tcpcall_acceptor:clients(S1)),
+    Request = term_to_binary(make_ref()),
+    ok = cast(c1, Request),
+    receive
+        {tcpcall_cast, _BridgeRef, Request} ->
+            ok
+    after 3000 ->
+            throw(no_cast_from_client)
+    end,
+    SuspendPeriod = 123456,
+    ok = tcpcall:suspend(S1, SuspendPeriod),
+    receive
+        {tcpcall_suspend, C1, SuspendPeriod} ->
+            ok
+    after 3000 ->
+            throw(no_suspend_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
     %% to avoid port number reuse in other tests
     ok = timer:sleep(500).
 

@@ -46,6 +46,8 @@ of the tcpcall Erlang module.
 * easy and efficient way to build RPC-like or send-only interactions
  between two Erlang nodes without need to bind the nodes
  into an Erlang cluster;
+* flow control - server side can inform clients to stop sending
+ new data for a configurable period of time;
 * does not any complex data processing, as it operates only
  with binaries (the user must implement payload encoding and
  deconding by himself).
@@ -305,3 +307,67 @@ And finally, stop the pool:
 ok = tcpcall:stop_pool(my_pool),
 ...
 ```
+
+## Flow control examples
+
+In any time tcpcall server side can send 'suspend' request back to all
+connected clients. Clients can handle such request and suspend data send
+(or can ignore such signals at all). This feature can be used to avoid
+overload of the server.
+
+Client side should use 'suspend_handler' option to able to react on
+'suspend' signals from the server:
+
+```
+{ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000},
+                             {suspend_handler, self()}]),
+...
+%% send some data
+ok = tcpcall:cast(Pid, Request1),
+ok = tcpcall:cast(Pid, Request2),
+ok = tcpcall:cast(Pid, Request3),
+...
+%% check for suspend
+receive
+    {tcpcall_suspend, Pid, Millis} ->
+        ok = timer:sleep(Millis)
+after 0 ->
+    ok
+end,
+%% send data again
+ok = tcpcall:cast(Pid, Request4),
+ok = tcpcall:cast(Pid, Request5),
+ok = tcpcall:cast(Pid, Request6),
+...
+```
+
+Value for 'suspend_handler' option can refer functional object with arity 1:
+
+```
+{ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000},
+                             {suspend_handler, fun suspend_handler/1}]),
+```
+
+Here is an example of suspend handler function:
+
+```
+-spec suspend_handler(Millis :: non_neg_integer()) -> Ignored :: any().
+suspend_handler(Millis) ->
+    %% do something
+    ...
+    ok.
+```
+
+This function will be called automatically for each 'suspend' request received
+from server side without any efforts from the tcpcall library user.
+
+So, lets back to the server side of tcpcall connection. Say, server processor
+function which receives requests can ask for suspend as follows:
+
+```
+...
+ok = tcpcall:suspend(ServerPidOrName, Millis),
+...
+```
+
+Appropriate signal will be sent to all connected clients.

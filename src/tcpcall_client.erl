@@ -413,6 +413,8 @@ handle_data_from_net(State, ?PACKET_ERROR(SeqNum, EncodedReason)) ->
             %% ignore
             ok
     end;
+handle_data_from_net(State, ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) ->
+    ok = do_suspend_hook(State, Millis);
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
     ok.
@@ -442,3 +444,19 @@ lord_report(State, IsConnected) when is_pid(State#state.lord) ->
     ok;
 lord_report(_State, _IsConnected) ->
     ok.
+
+%% @doc Fire hook for suspend event.
+-spec do_suspend_hook(#state{}, Millis :: non_neg_integer()) -> ok.
+do_suspend_hook(State, Millis) ->
+    case lists:keyfind(suspend_handler, 1, State#state.options) of
+        {suspend_handler, undefined} ->
+            ok;
+        {suspend_handler, PID} when is_atom(PID) orelse is_pid(PID) ->
+            _Sent = PID ! {tcpcall_suspend, self(), Millis},
+            ok;
+        {suspend_handler, Fun} when is_function(Fun, 1) ->
+            _Ignored = Fun(Millis),
+            ok;
+        false ->
+            ok
+    end.

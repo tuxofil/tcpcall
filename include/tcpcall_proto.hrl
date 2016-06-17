@@ -13,6 +13,7 @@
 -define(REPLY, 1).
 -define(ERROR, 2).
 -define(CAST, 3).
+-define(FLOW_CONTROL_SUSPEND, 4).
 
 %% packet formats
 -define(
@@ -39,5 +40,10 @@
    <<?CAST:8/big-unsigned,
      SeqNum:32/big-unsigned,
      Request/binary>>).
+
+-define(
+   PACKET_FLOW_CONTROL_SUSPEND(Millis),
+   <<?FLOW_CONTROL_SUSPEND:8/big-unsigned,
+     Millis:64/big-unsigned>>).
 
 -endif.

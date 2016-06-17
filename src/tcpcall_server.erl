@@ -12,7 +12,8 @@
 %% API exports
 -export(
    [start/1,
-    queue_reply/3
+    queue_reply/3,
+    suspend/2
    ]).
 
 %% gen_server callback exports
@@ -80,6 +81,11 @@
 -define(QUEUE_ERROR(RequestRef, Reason),
         {queue_error, RequestRef, Reason}).
 
+%% sent to the server to ask all connected clients to stop sending
+%% new data for a while
+-define(SUSPEND(Millis),
+        {suspend, Millis}).
+
 %% --------------------------------------------------------------------
 %% API functions
 %% --------------------------------------------------------------------
@@ -95,7 +101,8 @@ start(Options) ->
     {socket, Socket} = lists:keyfind(socket, 1, Options),
     case gen_tcp:controlling_process(Socket, Pid) of
         ok ->
-            ok = gen_server:cast(Pid, ?SIG_READY);
+            ok = gen_server:cast(Pid, ?SIG_READY),
+            ok = tcpcall_acceptor:register_client(Pid);
         {error, closed} ->
             %% the server is going down
             ok
@@ -107,6 +114,13 @@ start(Options) ->
                   Reply :: tcpcall:data()) -> ok.
 queue_reply(BridgeRef, RequestRef, Reply) ->
     ok = gen_server:cast(BridgeRef, ?QUEUE_REPLY(RequestRef, Reply)).
+
+%% @doc Ask all connected clients to not sent new data for a few time.
+%% Usually called from the request processor to ask for load decrease.
+-spec suspend(BridgeRef :: tcpcall:bridge_ref(),
+              Millis :: non_neg_integer()) -> ok.
+suspend(BridgeRef, Millis) when is_integer(Millis), 0 =< Millis ->
+    ok = gen_server:cast(BridgeRef, ?SUSPEND(Millis)).
 
 %% @hidden
 %% @doc Enqueue an error reply for transferring to the remote side.
@@ -226,6 +240,15 @@ handle_cast(?SIG_READY, State) ->
           ?VACUUM_PERIOD,
           ?MODULE, vacuum, [State#state.registry]),
     {noreply, State#state{ready = true}};
+handle_cast(?SUSPEND(Millis), State) ->
+    case gen_tcp:send(
+           State#state.socket,
+           ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
+        ok ->
+            {noreply, State};
+        {error, _Reason} ->
+            {stop, _Reason = normal, State}
+    end;
 handle_cast(_Request, State) ->
     {noreply, State}.
 
