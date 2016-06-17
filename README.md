@@ -205,3 +205,101 @@ case tcpcall:cast(my_client, Request) of
 end,
 ...
 ```
+
+## Using connection pools for load balancing
+
+Suppose you have a few tcpcall servers on nodes:
+
+* 10.0.0.1:5001;
+* 10.0.0.2:5002;
+* 10.0.0.3:5003.
+
+You can start pool of tcpcall clients for these servers. The pool will
+balance your requests between all alive servers. In case when request was
+failed to send to one server, it will be sent to next one until no alive
+servers left. Failover is done in such way to not exceed Timeout, passed
+as third argument to tcpcall:call_pool/3 API function.
+
+You can choose one of two available balancing policies:
+
+* round_robin;
+* random.
+
+Convenient feature of tcpcall connection pools is auto reconfiguration.
+Pool can be configured to re-read and apply on-the-fly list of servers
+using your custom functional object. New connections will be established
+in background and added to the pool, and alive connections to the servers
+not listed in new configurations, will be removed from the pool and closed.
+
+Lets try to start the pool:
+
+```
+...
+{ok, _Pid} =
+    tcpcall:connect_pool(
+        my_pool,
+        [{peers, [{"10.0.0.1", 5001},
+                  {"10.0.0.2", 5002},
+                  {"10.0.0.3", 5003}]}]),
+```
+
+Certainly, you can embed the pool in your Erlang application supervision
+tree like follows:
+
+```
+%% @hidden
+%% @doc Callback for application supervisor.
+init(_Args) ->
+    ReconfigPeriod = 30, %% in seconds
+    {ok, {
+       {one_for_one, 5, 1},
+       [
+        ...
+        {tcpcall_pool,
+         {tcpcall, connect_pool, [my_pool,
+                                  [{peers, fun get_servers/0, ReconfigPeriod}]]},
+         permanent, brutal_kill, worker, [tcpcall]},
+        ...
+       ]
+      }}.
+
+-spec get_servers() ->
+           [{Host :: inet:ip_address() | atom() | string() | binary(),
+             Port :: inet:port_number()}].
+get_servers() ->
+    [{"10.0.0.1", 5001},
+     {"10.0.0.2", 5002},
+     {"10.0.0.3", 5003}].
+```
+
+Now lets use the pool to balance requests to the servers:
+
+```
+...
+{ok, EncodedReply} = tcpcall:call_pool(my_pool, EncodedRequest1, Timeout),
+...
+ok = tcpcall:cast_pool(my_pool, EncodedRequest2),
+...
+```
+
+And even reconfigure the pool manually, adding and removing servers:
+
+```
+...
+NewPoolOptions =
+    [{peers, [{"10.0.0.1", 5001},
+              {"10.0.0.3", 5003},
+              {"10.0.0.4", 5003},
+              {"10.0.0.5", 5003}
+             ]}],
+ok = tcpcall:reconfig_pool(my_pool, NewPoolOptions),
+...
+```
+
+And finally, stop the pool:
+
+```
+...
+ok = tcpcall:stop_pool(my_pool),
+...
+```
