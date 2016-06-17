@@ -82,7 +82,7 @@ ok = tcpcall:cast(Pid, EncodedCast),
 ...
 ```
 
-== Example with callback function ==
+## Example with callback function
 
 On the server node:
 
