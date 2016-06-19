@@ -56,7 +56,7 @@ of the tcpcall Erlang module.
 
 On the server node:
 
-```
+```erlang
 {ok, Pid} = tcpcall:listen([{bind_port, 5000}, {receiver, self()}]),
 ...
 receive
@@ -73,7 +73,7 @@ receive
 
 On the client node:
 
-```
+```erlang
 {ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000}]),
 EncodedRequest = term_to_binary(5),
 {ok, EncodedReply} = tcpcall:call(Pid, EncodedRequest, 1000),
@@ -88,7 +88,7 @@ ok = tcpcall:cast(Pid, EncodedCast),
 
 On the server node:
 
-```
+```erlang
 {ok, Pid} =
     tcpcall:listen(
         [{bind_port, 5000},
@@ -107,7 +107,7 @@ On the server node:
 
 On the client node:
 
-```
+```erlang
 {ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000}]),
 EncodedRequest = term_to_binary(5),
 {ok, EncodedReply} = tcpcall:call(Pid, EncodedRequest, 1000),
@@ -127,7 +127,7 @@ discarded.
 Here is example for starting tcpcall server as part of the supervision tree of
 your Erlang application:
 
-```
+```erlang
 %% @hidden
 %% @doc Callback for application supervisor.
 init(_Args) ->
@@ -149,7 +149,7 @@ init(_Args) ->
 Here is example for starting tcpcall client as part of the supervision tree of
 your Erlang application:
 
-```
+```erlang
 %% @hidden
 %% @doc Callback for application supervisor.
 init(_Args) ->
@@ -167,7 +167,7 @@ init(_Args) ->
 
 Now you can use tcpcall client from any process of your application like:
 
-```
+```erlang
 ...
 case tcpcall:call(my_client, Request, Timeout) of
     {ok, Reply} ->
@@ -190,7 +190,7 @@ end,
 
 or send casts like:
 
-```
+```erlang
 ...
 case tcpcall:cast(my_client, Request) of
     ok ->
@@ -235,7 +235,7 @@ not listed in new configurations, will be removed from the pool and closed.
 
 Lets try to start the pool:
 
-```
+```erlang
 ...
 {ok, _Pid} =
     tcpcall:connect_pool(
@@ -249,7 +249,7 @@ Lets try to start the pool:
 Certainly, you can embed the pool in your Erlang application supervision
 tree like follows:
 
-```
+```erlang
 %% @hidden
 %% @doc Callback for application supervisor.
 init(_Args) ->
@@ -277,7 +277,7 @@ get_servers() ->
 
 Now lets use the pool to balance requests to the servers:
 
-```
+```erlang
 ...
 {ok, EncodedReply} = tcpcall:call_pool(my_pool, EncodedRequest1, Timeout),
 ...
@@ -287,7 +287,7 @@ ok = tcpcall:cast_pool(my_pool, EncodedRequest2),
 
 And even reconfigure the pool manually, adding and removing servers:
 
-```
+```erlang
 ...
 NewPoolOptions =
     [{balancer, random},
@@ -302,7 +302,7 @@ ok = tcpcall:reconfig_pool(my_pool, NewPoolOptions),
 
 And finally, stop the pool:
 
-```
+```erlang
 ...
 ok = tcpcall:stop_pool(my_pool),
 ...
@@ -318,7 +318,7 @@ overload of the server.
 Client side should use 'suspend_handler' option to able to react on
 'suspend' signals from the server:
 
-```
+```erlang
 {ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000},
                              {suspend_handler, self()}]),
 ...
@@ -343,14 +343,14 @@ ok = tcpcall:cast(Pid, Request6),
 
 Value for 'suspend_handler' option can refer functional object with arity 1:
 
-```
+```erlang
 {ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000},
                              {suspend_handler, fun suspend_handler/1}]),
 ```
 
 Here is an example of suspend handler function:
 
-```
+```erlang
 -spec suspend_handler(Millis :: non_neg_integer()) -> Ignored :: any().
 suspend_handler(Millis) ->
     %% do something
@@ -364,7 +364,7 @@ from server side without any efforts from the tcpcall library user.
 So, lets back to the server side of tcpcall connection. Say, server processor
 function which receives requests can ask for suspend as follows:
 
-```
+```erlang
 ...
 ok = tcpcall:suspend(ServerPidOrName, Millis),
 ...
@@ -390,7 +390,7 @@ to all connected clients so they can discard suspend mode immediately.
 To handle 'resume' signals on the client side you have to define 'resume_handler'
 option when creating tcpcall client:
 
-```
+```erlang
 {ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000},
                              {suspend_handler, fun suspend_handler/1},
                              {resume_handler, ResumeHandler}]),
@@ -400,7 +400,7 @@ where ResumeHandler can be Erlang process ID, Erlang process registered name
 or functional object with arity of 0. If ResumeHandler is registered name or PID,
 target process will receive messages like:
 
-```
+```erlang
 receive
     {tcpcall_resume, ClientPID} ->
         ...
@@ -409,7 +409,7 @@ end,
 
 If ResumeHandler is refer to a functional object, it can be defined as follows:
 
-```
+```erlang
 ResumeHandler =
     fun() ->
         %% do something here when 'resume' signal
