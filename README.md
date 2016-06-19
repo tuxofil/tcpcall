@@ -434,3 +434,67 @@ server sends ``resume`` signal.
 When you try to send to much data and all servers go to suspend mode, all
 ``tcpcall:call_pool/3`` and ``tcpcall:cast_pool/2`` requests will return
 ``{error, not_connected}``, informing caller to retry send later.
+
+## Sending async data from server back to client
+
+Previous section covered sending flow control signals from server to connected
+clients.
+
+But there is another method which can be used to send any data from server
+side to all connected clients:
+
+```erlang
+Encoded = term_to_binary({any, term, you, want, [1, 2, 3]}),
+ok = tcpcall:uplink_cast(ServerRef, Encoded),
+```
+
+To handle such data on the client side you have to create client processes
+as follows:
+
+```erlang
+{ok, _} = tcpcall:connect([{host, Host}, {port, Port}, {name, c1},
+                           {uplink_cast_handler, UplinkCastHandler}]),
+```
+
+where ``UplinkCastHandler`` can be:
+
+* Erlang process registered name (atom);
+* Erlang process ID;
+* functional object with arity of 1.
+
+When ``UplinkCastHandler`` is set to atom or PID, target process will receive
+a message like:
+
+```erlang
+receive
+    {tcpcall_uplink_cast, ConnectionPID, Encoded} ->
+        Cast = binary_to_term(Encoded),
+        %% do something with request
+        ...
+end,
+```
+
+When ``UplinkCastHandler`` is set to functional object, the object should be
+defined like this one:
+
+```erlang
+-spec uplink_cast_handler(Encoded :: binary()) -> Ignored :: any().
+uplink_cast_handler(Encoded) ->
+    Cast = binary_to_term(Encoded),
+    %% do something with request
+    ...
+    ok.
+```
+
+### Handling async data from server with pools
+
+To able to handle such data the pool must be created with configuration option:
+
+```erlang
+{ok, _} = connect_pool(p1, [{peers, Peers},
+                            {uplink_cast_handler, UplinkCastHandler}]),
+```
+
+Unlike with ``suspend`` and ``resume`` signals **tcpcall** connection pool doesn't
+handle uplink casts by itself. If created without ``uplink_cast_handler`` option,
+the pool will silently discard all data sent by servers.

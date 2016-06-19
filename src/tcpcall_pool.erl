@@ -180,12 +180,16 @@ init({PoolName, Options}) ->
                          {noreply, State :: #state{}} |
                          {stop, Reason :: any(), NewState :: #state{}}.
 handle_info(?SIG_SPAWN({_No, {Host, Port}} = Peer), State) ->
+    UplinkCastHandler =
+        proplists:get_value(
+          uplink_cast_handler, State#state.options, fun(_) -> ok end),
     case lists:member(Peer, State#state.peers) of
         true ->
             case tcpcall:connect(
                    [{host, Host}, {port, Port}, {lord, self()},
                     {suspend_handler, self()},
-                    {resume_handler, self()}]) of
+                    {resume_handler, self()},
+                    {uplink_cast_handler, UplinkCastHandler}]) of
                 {ok, Pid} ->
                     NewState =
                         State#state{

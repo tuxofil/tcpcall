@@ -15,6 +15,7 @@
 -define(CAST, 3).
 -define(FLOW_CONTROL_SUSPEND, 4).
 -define(FLOW_CONTROL_RESUME, 5).
+-define(UPLINK_CAST, 6).
 
 %% packet formats
 -define(
@@ -50,5 +51,10 @@
 -define(
    PACKET_FLOW_CONTROL_RESUME,
    <<?FLOW_CONTROL_RESUME:8/big-unsigned>>).
+
+-define(
+   PACKET_UPLINK_CAST(Data),
+   <<?UPLINK_CAST:8/big-unsigned,
+     Data/binary>>).
 
 -endif.

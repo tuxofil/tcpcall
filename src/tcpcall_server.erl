@@ -14,7 +14,8 @@
    [start/1,
     queue_reply/3,
     suspend/2,
-    resume/1
+    resume/1,
+    uplink_cast/2
    ]).
 
 %% gen_server callback exports
@@ -90,6 +91,10 @@
 %% sent to the server to ask all connected clients to disable suspend mode
 -define(RESUME, resume).
 
+%% signal to server to send some data to the client side
+-define(QUEUE_UPLINK_CAST(Data),
+        {uplink_cast, Data}).
+
 %% --------------------------------------------------------------------
 %% API functions
 %% --------------------------------------------------------------------
@@ -131,6 +136,11 @@ suspend(BridgeRef, Millis) when is_integer(Millis), 0 =< Millis ->
 -spec resume(BridgeRef :: tcpcall:bridge_ref()) -> ok.
 resume(BridgeRef) ->
     ok = gen_server:cast(BridgeRef, ?RESUME).
+
+%% @doc Send responseless cast to the client side.
+-spec uplink_cast(BridgeRef :: tcpcall:bridge_ref(), Data :: binary()) -> ok.
+uplink_cast(BridgeRef, Data) when is_binary(Data) ->
+    ok = gen_server:cast(BridgeRef, ?QUEUE_UPLINK_CAST(Data)).
 
 %% @hidden
 %% @doc Enqueue an error reply for transferring to the remote side.
@@ -262,6 +272,14 @@ handle_cast(?SUSPEND(Millis), State) ->
 handle_cast(?RESUME, State) ->
     case gen_tcp:send(
            State#state.socket, ?PACKET_FLOW_CONTROL_RESUME) of
+        ok ->
+            {noreply, State};
+        {error, _Reason} ->
+            {stop, _Reason = normal, State}
+    end;
+handle_cast(?QUEUE_UPLINK_CAST(Data), State) ->
+    case gen_tcp:send(
+           State#state.socket, ?PACKET_UPLINK_CAST(Data)) of
         ok ->
             {noreply, State};
         {error, _Reason} ->

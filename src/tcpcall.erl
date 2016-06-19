@@ -22,6 +22,7 @@
     reply/3,
     suspend/2,
     resume/1,
+    uplink_cast/2,
     stop_server/1,
     stop_client/1,
     stop_pool/1
@@ -67,6 +68,7 @@
         {name, RegisteredName :: atom()} |
         {suspend_handler, suspend_handler()} |
         {resume_handler, resume_handler()} |
+        {uplink_cast_handler, uplink_cast_handler()} |
         {lord, pid()}.
 
 -type client_pool_name() :: atom().
@@ -76,7 +78,8 @@
 -type client_pool_option() ::
         {peers, [peer()]} |
         {peers, peers_getter(), Seconds :: pos_integer()} |
-        {balancer, balancer()}.
+        {balancer, balancer()} |
+        {uplink_cast_handler, uplink_cast_handler()}.
 
 -type peer() ::
         {host(), inet:port_number()}.
@@ -103,6 +106,11 @@
         (RegisteredName :: atom()) |
         pid() |
         fun(() -> any()).
+
+-type uplink_cast_handler() ::
+        (RegisteredName :: atom()) |
+        pid() |
+        fun((Data :: binary()) -> Ignored :: any()).
 
 -type bridge_ref() ::
         (BridgeRegisteredName :: atom()) |
@@ -239,6 +247,15 @@ resume(BridgeRef) ->
     lists:foreach(
       fun(PID) ->
               ok = tcpcall_server:resume(PID)
+      end, tcpcall_acceptor:clients(BridgeRef)).
+
+%% @doc Send responseless cast to all connected clients.
+%% Called from the server side.
+-spec uplink_cast(BridgeRef :: bridge_ref(), Data :: binary()) -> ok.
+uplink_cast(BridgeRef, Data) ->
+    lists:foreach(
+      fun(PID) ->
+              ok = tcpcall_server:uplink_cast(PID, Data)
       end, tcpcall_acceptor:clients(BridgeRef)).
 
 %% @hidden
@@ -837,6 +854,65 @@ resume_3_test() ->
     %% to avoid port number reuse in other tests
     ok = timer:sleep(500).
 
+uplink_cast_1_test() ->
+    true = register(self, self()),
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {uplink_cast_handler, self}]),
+    ok = timer:sleep(500),
+    Data = term_to_binary(make_ref()),
+    ok = tcpcall:uplink_cast(S1, Data),
+    receive
+        {tcpcall_uplink_cast, C1, Data} ->
+            ok
+    after 3000 ->
+            throw(no_uplink_cast_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    true = unregister(self),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+uplink_cast_2_test() ->
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {uplink_cast_handler, self()}]),
+    ok = timer:sleep(500),
+    Data = term_to_binary(make_ref()),
+    ok = tcpcall:uplink_cast(S1, Data),
+    receive
+        {tcpcall_uplink_cast, C1, Data} ->
+            ok
+    after 3000 ->
+            throw(no_uplink_cast_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+uplink_cast_3_test() ->
+    Self = self(),
+    UplinkCastHandler =
+        fun(Data) ->
+                Self ! {custom_cast, Data}
+        end,
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, _} = connect([{host, "127.1"}, {port, 5001}, {name, c1},
+                       {uplink_cast_handler, UplinkCastHandler}]),
+    ok = timer:sleep(500),
+    Data = term_to_binary(make_ref()),
+    ok = tcpcall:uplink_cast(S1, Data),
+    receive
+        {custom_cast, Data} ->
+            ok
+    after 3000 ->
+            throw(no_uplink_cast_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
 pool_suspend_test() ->
     ServerProcessor = fun() -> receive stop -> ok end end,
     SP1 = spawn_link(ServerProcessor),
@@ -929,6 +1005,35 @@ pool_resume_test() ->
     ok = stop_server(s1),
     ok = stop_server(s2),
     ok = stop_server(s3),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(100).
+
+pool_uplink_cast_1_test() ->
+    SP1 = spawn_link(fun() -> receive stop -> ok end end),
+    {ok, _} = listen([{bind_port, 5001}, {name, s1}, {receiver, SP1}]),
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001}, {"127.1", 5001}]},
+                                {uplink_cast_handler, self()}]),
+    ok = timer:sleep(100),
+    Data = term_to_binary(make_ref()),
+    ok = tcpcall:uplink_cast(s1, Data),
+    receive
+        {tcpcall_uplink_cast, _ConnectionID1, Data} ->
+            ok
+    after 1000 ->
+            throw(no_uplink_cast_from_server)
+    end,
+    receive
+        {tcpcall_uplink_cast, _ConnectionID2, Data} ->
+            ok
+    after 1000 ->
+            throw(no_uplink_cast_from_server)
+    end,
+    %% stop server processors
+    stop = SP1 ! stop,
+    %% stop the servers
+    ok = stop_server(s1),
     %% stop the pool
     ok = stop_pool(p1),
     %% to avoid port number reuse in other tests

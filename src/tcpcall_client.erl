@@ -428,6 +428,19 @@ handle_data_from_net(State, ?PACKET_FLOW_CONTROL_RESUME) ->
         false ->
             ok
     end;
+handle_data_from_net(State, ?PACKET_UPLINK_CAST(Data)) ->
+    case lists:keyfind(uplink_cast_handler, 1, State#state.options) of
+        {uplink_cast_handler, undefined} ->
+            ok;
+        {uplink_cast_handler, PID} when is_atom(PID) orelse is_pid(PID) ->
+            _Sent = PID ! {tcpcall_uplink_cast, self(), Data},
+            ok;
+        {uplink_cast_handler, Fun} when is_function(Fun, 1) ->
+            _Ignored = Fun(Data),
+            ok;
+        false ->
+            ok
+    end;
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
     ok.
