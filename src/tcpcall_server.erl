@@ -13,7 +13,8 @@
 -export(
    [start/1,
     queue_reply/3,
-    suspend/2
+    suspend/2,
+    resume/1
    ]).
 
 %% gen_server callback exports
@@ -86,6 +87,9 @@
 -define(SUSPEND(Millis),
         {suspend, Millis}).
 
+%% sent to the server to ask all connected clients to disable suspend mode
+-define(RESUME, resume).
+
 %% --------------------------------------------------------------------
 %% API functions
 %% --------------------------------------------------------------------
@@ -121,6 +125,12 @@ queue_reply(BridgeRef, RequestRef, Reply) ->
               Millis :: non_neg_integer()) -> ok.
 suspend(BridgeRef, Millis) when is_integer(Millis), 0 =< Millis ->
     ok = gen_server:cast(BridgeRef, ?SUSPEND(Millis)).
+
+%% @doc Ask all connected clients to disable suspend mode and continue
+%% to send new data. Usually called from the request processor.
+-spec resume(BridgeRef :: tcpcall:bridge_ref()) -> ok.
+resume(BridgeRef) ->
+    ok = gen_server:cast(BridgeRef, ?RESUME).
 
 %% @hidden
 %% @doc Enqueue an error reply for transferring to the remote side.
@@ -244,6 +254,14 @@ handle_cast(?SUSPEND(Millis), State) ->
     case gen_tcp:send(
            State#state.socket,
            ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
+        ok ->
+            {noreply, State};
+        {error, _Reason} ->
+            {stop, _Reason = normal, State}
+    end;
+handle_cast(?RESUME, State) ->
+    case gen_tcp:send(
+           State#state.socket, ?PACKET_FLOW_CONTROL_RESUME) of
         ok ->
             {noreply, State};
         {error, _Reason} ->

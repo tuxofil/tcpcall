@@ -415,6 +415,19 @@ handle_data_from_net(State, ?PACKET_ERROR(SeqNum, EncodedReason)) ->
     end;
 handle_data_from_net(State, ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) ->
     ok = do_suspend_hook(State, Millis);
+handle_data_from_net(State, ?PACKET_FLOW_CONTROL_RESUME) ->
+    case lists:keyfind(resume_handler, 1, State#state.options) of
+        {resume_handler, undefined} ->
+            ok;
+        {resume_handler, PID} when is_atom(PID) orelse is_pid(PID) ->
+            _Sent = PID ! {tcpcall_resume, self()},
+            ok;
+        {resume_handler, Fun} when is_function(Fun, 0) ->
+            _Ignored = Fun(),
+            ok;
+        false ->
+            ok
+    end;
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
     ok.

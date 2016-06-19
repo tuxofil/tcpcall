@@ -372,6 +372,54 @@ ok = tcpcall:suspend(ServerPidOrName, Millis),
 
 Appropriate signal will be sent to all connected clients.
 
+### Early discard for suspend mode
+
+Consider use case:
+
+1. Clients sent 1000 requests to the one server in a short period of time;
+2. The server see he can't process all these requests right now and send 'suspend'
+ signal back to the clients, asking for suspend for next 5 minutes;
+3. Clients receive the signal and stop to send new data, waiting for 5 minutes to elapse;
+4. Only 2 minutes was elapsed, but server has been already processed all buffered
+ requests.
+
+What should we do? Idle for next 3 minutes? There's a better solution - server
+side calls tcpcall:resume/1 API call. Special 'resume' signal will be dispatched
+to all connected clients so they can discard suspend mode immediately.
+
+To handle 'resume' signals on the client side you have to define 'resume_handler'
+option when creating tcpcall client:
+
+```
+{ok, Pid} = tcpcall:connect([{host, "server.com"}, {port, 5000},
+                             {suspend_handler, fun suspend_handler/1},
+                             {resume_handler, ResumeHandler}]),
+```
+
+where ResumeHandler can be Erlang process ID, Erlang process registered name
+or functional object with arity of 0. If ResumeHandler is registered name or PID,
+target process will receive messages like:
+
+```
+receive
+    {tcpcall_resume, ClientPID} ->
+        ...
+end,
+```
+
+If ResumeHandler is refer to a functional object, it can be defined as follows:
+
+```
+ResumeHandler =
+    fun() ->
+        %% do something here when 'resume' signal
+        %% arrives from the tcpcall server side
+        ...
+    end,
+```
+
+Term, returned by the ResumeHandler, is ignored.
+
 ### Flow control in connection pools
 
 It's even easier than with bare tcpcall connections. There is nothing to do

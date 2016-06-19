@@ -14,6 +14,7 @@
 -define(ERROR, 2).
 -define(CAST, 3).
 -define(FLOW_CONTROL_SUSPEND, 4).
+-define(FLOW_CONTROL_RESUME, 5).
 
 %% packet formats
 -define(
@@ -45,5 +46,9 @@
    PACKET_FLOW_CONTROL_SUSPEND(Millis),
    <<?FLOW_CONTROL_SUSPEND:8/big-unsigned,
      Millis:64/big-unsigned>>).
+
+-define(
+   PACKET_FLOW_CONTROL_RESUME,
+   <<?FLOW_CONTROL_RESUME:8/big-unsigned>>).
 
 -endif.

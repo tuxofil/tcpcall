@@ -21,6 +21,7 @@
     reconfig_pool/2,
     reply/3,
     suspend/2,
+    resume/1,
     stop_server/1,
     stop_client/1,
     stop_pool/1
@@ -46,6 +47,7 @@
     host/0,
     receiver/0,
     suspend_handler/0,
+    resume_handler/0,
     bridge_ref/0,
     data/0
    ]).
@@ -64,6 +66,7 @@
         {port, RemotePort :: inet:port_number()} |
         {name, RegisteredName :: atom()} |
         {suspend_handler, suspend_handler()} |
+        {resume_handler, resume_handler()} |
         {lord, pid()}.
 
 -type client_pool_name() :: atom().
@@ -95,6 +98,11 @@
         (RegisteredName :: atom()) |
         pid() |
         fun((Millis :: non_neg_integer()) -> any()).
+
+-type resume_handler() ::
+        (RegisteredName :: atom()) |
+        pid() |
+        fun(() -> any()).
 
 -type bridge_ref() ::
         (BridgeRegisteredName :: atom()) |
@@ -221,6 +229,16 @@ suspend(BridgeRef, Millis) ->
     lists:foreach(
       fun(PID) ->
               ok = tcpcall_server:suspend(PID, Millis)
+      end, tcpcall_acceptor:clients(BridgeRef)).
+
+%% @see suspend/2
+%% @doc Ask all connected clients to disable suspend mode and continue
+%% to send new data. Called from the server side.
+-spec resume(BridgeRef :: bridge_ref()) -> ok.
+resume(BridgeRef) ->
+    lists:foreach(
+      fun(PID) ->
+              ok = tcpcall_server:resume(PID)
       end, tcpcall_acceptor:clients(BridgeRef)).
 
 %% @hidden
@@ -727,6 +745,61 @@ suspend_test() ->
             ok
     after 3000 ->
             throw(no_suspend_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+resume_1_test() ->
+    true = register(self, self()),
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {resume_handler, self}]),
+    ok = timer:sleep(500),
+    ok = tcpcall:resume(S1),
+    receive
+        {tcpcall_resume, C1} ->
+            ok
+    after 3000 ->
+            throw(no_resume_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    true = unregister(self),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+resume_2_test() ->
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {resume_handler, self()}]),
+    ok = timer:sleep(500),
+    ok = tcpcall:resume(S1),
+    receive
+        {tcpcall_resume, C1} ->
+            ok
+    after 3000 ->
+            throw(no_resume_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+resume_3_test() ->
+    Self = self(),
+    ResumeHandler =
+        fun() ->
+                Self ! custom_resume_event
+        end,
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, _} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {resume_handler, ResumeHandler}]),
+    ok = timer:sleep(500),
+    ok = tcpcall:resume(S1),
+    receive
+        custom_resume_event ->
+            ok
+    after 3000 ->
+            throw(no_resume_from_server)
     end,
     ok = stop_server(s1),
     ok = stop_client(c1),
