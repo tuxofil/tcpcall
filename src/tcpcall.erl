@@ -885,6 +885,55 @@ pool_suspend_test() ->
     %% to avoid port number reuse in other tests
     ok = timer:sleep(100).
 
+pool_resume_test() ->
+    ServerProcessor = fun() -> receive stop -> ok end end,
+    SP1 = spawn_link(ServerProcessor),
+    SP2 = spawn_link(ServerProcessor),
+    SP3 = spawn_link(ServerProcessor),
+    {ok, _} = listen([{bind_port, 5001}, {name, s1}, {receiver, SP1}]),
+    {ok, _} = listen([{bind_port, 5002}, {name, s2}, {receiver, SP2}]),
+    {ok, _} = listen([{bind_port, 5003}, {name, s3}, {receiver, SP3}]),
+    {ok, _} = connect_pool(p1, [{peers, [{"127.1", 5001},
+                                         {"127.1", 5002},
+                                         {"127.1", 5003}]}]),
+    ok = timer:sleep(100),
+    %% send some data
+    [?assertMatch(ok, cast_pool(p1, <<>>)) || _ <- lists:seq(1, 90)],
+    ok = timer:sleep(100),
+    %% test server processors mailboxes
+    ?assertMatch({message_queue_len, 30}, process_info(SP1, message_queue_len)),
+    ?assertMatch({message_queue_len, 30}, process_info(SP2, message_queue_len)),
+    ?assertMatch({message_queue_len, 30}, process_info(SP3, message_queue_len)),
+    %% ask for suspend in the name of server #2 for a long time and then send more data
+    ok = tcpcall:suspend(s2, 30000),
+    ok = timer:sleep(100),
+    [?assertMatch(ok, cast_pool(p1, <<>>)) || _ <- lists:seq(1, 90)],
+    ok = timer:sleep(100),
+    %% test server processors mailboxes
+    ?assertMatch({message_queue_len, 75}, process_info(SP1, message_queue_len)),
+    ?assertMatch({message_queue_len, 30}, process_info(SP2, message_queue_len)),
+    ?assertMatch({message_queue_len, 75}, process_info(SP3, message_queue_len)),
+    %% request discard suspend mode for server #2 and send some data again
+    ok = tcpcall:resume(s2),
+    ok = timer:sleep(500),
+    [?assertMatch(ok, cast_pool(p1, <<>>)) || _ <- lists:seq(1, 60)],
+    ok = timer:sleep(100),
+    ?assertMatch({message_queue_len, 95}, process_info(SP1, message_queue_len)),
+    ?assertMatch({message_queue_len, 50}, process_info(SP2, message_queue_len)),
+    ?assertMatch({message_queue_len, 95}, process_info(SP3, message_queue_len)),
+    %% stop server processors
+    stop = SP1 ! stop,
+    stop = SP2 ! stop,
+    stop = SP3 ! stop,
+    %% stop the servers
+    ok = stop_server(s1),
+    ok = stop_server(s2),
+    ok = stop_server(s3),
+    %% stop the pool
+    ok = stop_pool(p1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(100).
+
 is_connected_test() ->
     %% start the client
     {ok, _} = connect([{host, "127.1"}, {port, 5000}, {name, c}]),

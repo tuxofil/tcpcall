@@ -428,7 +428,8 @@ on the client side, just create connection pool as usual.
 When one of your servers decides to call ``tcpcall:suspend/2``, the pool receives
 this signal and removes that server from load balancing for requested period
 of time. When suspend period expires, server will be added to the load balancing
-again automatically.
+again automatically. Suspend mode for server will be discarded immediately when
+server sends ``resume`` signal.
 
 When you try to send to much data and all servers go to suspend mode, all
 ``tcpcall:call_pool/3`` and ``tcpcall:cast_pool/2`` requests will return

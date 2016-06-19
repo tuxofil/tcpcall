@@ -184,7 +184,8 @@ handle_info(?SIG_SPAWN({_No, {Host, Port}} = Peer), State) ->
         true ->
             case tcpcall:connect(
                    [{host, Host}, {port, Port}, {lord, self()},
-                    {suspend_handler, self()}]) of
+                    {suspend_handler, self()},
+                    {resume_handler, self()}]) of
                 {ok, Pid} ->
                     NewState =
                         State#state{
@@ -252,6 +253,23 @@ handle_info({tcpcall_suspend, Pid, Millis}, State) ->
             {noreply, NewState};
         {ok, _} ->
             %% worker is not connected => ignore
+            {noreply, State};
+        error ->
+            %% no such worker found => ignore
+            {noreply, State}
+    end;
+handle_info({tcpcall_resume, Pid}, State) ->
+    %% Client asks for suspend disable
+    case dict:find(Pid, State#state.workers) of
+        {ok, {IsConnected = true, _Suspended = true, Peer}} ->
+            NewWorkers =
+                dict:store(
+                  Pid, {IsConnected, false, Peer}, State#state.workers),
+            NewState = State#state{workers = NewWorkers},
+            ok = publish_workers(NewState),
+            {noreply, NewState};
+        {ok, _} ->
+            %% worker is not connected ot not in suspend mode => ignore
             {noreply, State};
         error ->
             %% no such worker found => ignore
