@@ -724,24 +724,55 @@ auto_reconfig_pool_test() ->
     %% to avoid port number reuse in other tests
     ok = timer:sleep(500).
 
-suspend_test() ->
+suspend_1_test() ->
     {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
     {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {suspend_handler, self()}]),
     ok = timer:sleep(500),
-    ?assert(is_connected(C1)),
-    ?assertMatch([_], tcpcall_acceptor:clients(S1)),
-    Request = term_to_binary(make_ref()),
-    ok = cast(c1, Request),
-    receive
-        {tcpcall_cast, _BridgeRef, Request} ->
-            ok
-    after 3000 ->
-            throw(no_cast_from_client)
-    end,
     SuspendPeriod = 123456,
     ok = tcpcall:suspend(S1, SuspendPeriod),
     receive
         {tcpcall_suspend, C1, SuspendPeriod} ->
+            ok
+    after 3000 ->
+            throw(no_suspend_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+suspend_2_test() ->
+    true = register(self, self()),
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, C1} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {suspend_handler, self}]),
+    ok = timer:sleep(500),
+    SuspendPeriod = 123456,
+    ok = tcpcall:suspend(S1, SuspendPeriod),
+    receive
+        {tcpcall_suspend, C1, SuspendPeriod} ->
+            ok
+    after 3000 ->
+            throw(no_suspend_from_server)
+    end,
+    ok = stop_server(s1),
+    ok = stop_client(c1),
+    true = unregister(self),
+    %% to avoid port number reuse in other tests
+    ok = timer:sleep(500).
+
+suspend_3_test() ->
+    Self = self(),
+    SuspendHandler =
+        fun(Millis) ->
+                Self ! {custom_suspend, Millis}
+        end,
+    {ok, S1} = listen([{bind_port, 5001}, {name, s1}, {receiver, self()}]),
+    {ok, _} = connect([{host, "127.1"}, {port, 5001}, {name, c1}, {suspend_handler, SuspendHandler}]),
+    ok = timer:sleep(500),
+    SuspendPeriod = 123456,
+    ok = tcpcall:suspend(S1, SuspendPeriod),
+    receive
+        {custom_suspend, SuspendPeriod} ->
             ok
     after 3000 ->
             throw(no_suspend_from_server)
