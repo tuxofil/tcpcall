@@ -1,3 +1,14 @@
+erlang-tcpcall (1.0.0) unstable; urgency=low
+
+  * implement async data from server to clients
+  * pool: honor resume requests from servers
+  * extend unit tests for suspend feature
+  * readme: enrich text
+  * readme: enrich text with GitHub-specific markup
+  * flow control: server-side resume API call
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Sun, 19 Jun 2016 18:15:26 +0300
+
 erlang-tcpcall (0.8.0) unstable; urgency=low
 
   * pool: honor suspend requests from servers
