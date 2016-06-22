@@ -15,7 +15,8 @@
     queue_reply/3,
     suspend/2,
     resume/1,
-    uplink_cast/2
+    uplink_cast/2,
+    stop/1
    ]).
 
 %% gen_server callback exports
@@ -152,6 +153,11 @@ queue_error(BridgeRef, RequestRef, Reason) ->
     EncodedReason = term_to_binary(Reason),
     ok = gen_server:cast(
            BridgeRef, ?QUEUE_ERROR(RequestRef, EncodedReason)).
+
+%% @doc Stop process, closing connection to the client.
+-spec stop(BridgeRef :: tcpcall:bridge_ref()) -> ok.
+stop(BridgeRef) ->
+    ok = gen_server:call(BridgeRef, ?SIG_STOP).
 
 %% --------------------------------------------------------------------
 %% gen_server callback functions
@@ -290,7 +296,10 @@ handle_cast(_Request, State) ->
 
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
+                         {stop, Reason :: normal, Reply :: ok, #state{}} |
                          {noreply, NewState :: #state{}}.
+handle_call(?SIG_STOP, _From, State) ->
+    {stop, _Reason = normal, _Reply = ok, State};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
 

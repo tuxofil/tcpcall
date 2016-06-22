@@ -14,6 +14,7 @@
    [start_link/1,
     clients/1,
     register_client/1,
+    set_active/2,
     stop/1
    ]).
 
@@ -29,9 +30,11 @@
 %% --------------------------------------------------------------------
 
 -define(SIG_ACCEPT, accept).
+-define(SIG_SET_ACTIVE(IsActive), {set_active, IsActive}).
 
 -record(state,
-        {socket :: port(),
+        {bind_port :: inet:port_number(),
+         socket :: port(),
          receiver :: tcpcall:receiver()}).
 
 %% --------------------------------------------------------------------
@@ -75,6 +78,12 @@ register_client(ClientConnectionPID) ->
             ok
     end.
 
+%% @doc Tell the acceptor process to enable/disable server.
+-spec set_active(BridgeRef :: tcpcall:bridge_ref(),
+                 IsActive :: boolean()) -> ok.
+set_active(BridgeRef, IsActive) when is_boolean(IsActive) ->
+    ok = gen_server:call(BridgeRef, ?SIG_SET_ACTIVE(IsActive), infinity).
+
 %% @doc Tell the acceptor process to stop.
 -spec stop(BridgeRef :: tcpcall:bridge_ref()) -> ok.
 stop(BridgeRef) ->
@@ -97,13 +106,11 @@ init(Options) ->
     end,
     {bind_port, BindPort} = lists:keyfind(bind_port, 1, Options),
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
-    SocketOpts =
-        [{active, false}, binary, {reuseaddr, true}, {packet, 4},
-         {keepalive, true}],
-    {ok, Socket} = gen_tcp:listen(BindPort, SocketOpts),
-    ok = schedule_accept(),
-    {ok, _State = #state{socket = Socket,
-                         receiver = Receiver}}.
+    InitialState =
+        #state{
+           bind_port = BindPort,
+           receiver = Receiver},
+    {ok, listen(InitialState)}.
 
 %% @hidden
 -spec handle_cast(Request :: any(), State :: #state{}) ->
@@ -115,7 +122,7 @@ handle_cast(_Request, State) ->
 -spec handle_info(Request :: any(), State :: #state{}) ->
                          {noreply, State :: #state{}} |
                          {stop, Reason :: any(), State :: #state{}}.
-handle_info(?SIG_ACCEPT, State) ->
+handle_info(?SIG_ACCEPT, State) when State#state.socket /= undefined ->
     case gen_tcp:accept(State#state.socket, 100) of
         {ok, Socket} ->
             ok = tcpcall_server:start(
@@ -127,6 +134,9 @@ handle_info(?SIG_ACCEPT, State) ->
     end,
     ok = schedule_accept(),
     {noreply, State};
+handle_info(?SIG_ACCEPT, State) ->
+    %% not in active state
+    {noreply, State};
 handle_info(?SIG_STOP, State) ->
     {stop, _Reason = normal, State};
 handle_info(_Request, State) ->
@@ -135,6 +145,24 @@ handle_info(_Request, State) ->
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
                          {noreply, NewState :: #state{}}.
+handle_call(?SIG_SET_ACTIVE(IsActive), _From, State)
+  when IsActive /= (State#state.socket /= undefined) ->
+    %% we are about changing server state
+    if IsActive ->
+            %% enabling the server
+            {reply, ok, listen(State)};
+       true ->
+            %% disabling the server
+            ok = gen_tcp:close(State#state.socket),
+            lists:foreach(
+              fun(ActiveConnectionPID) ->
+                      catch tcpcall_server:stop(ActiveConnectionPID)
+              end, clients(self())),
+            {reply, ok, State#state{socket = undefined}}
+    end;
+handle_call(?SIG_SET_ACTIVE(_IsActive), _From, State) ->
+    %% we're already in requested state => ignore
+    {reply, ok, State};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
 
@@ -152,6 +180,17 @@ code_change(_OldVsn, State, _Extra) ->
 %% ----------------------------------------------------------------------
 %% Internal functions
 %% ----------------------------------------------------------------------
+
+%% @doc Start listening configured TCP port number and update process
+%% state term with created socket.
+-spec listen(#state{}) -> NewState :: #state{}.
+listen(State) ->
+    SocketOpts =
+        [{active, false}, binary, {reuseaddr, true}, {packet, 4},
+         {keepalive, true}],
+    {ok, Socket} = gen_tcp:listen(State#state.bind_port, SocketOpts),
+    ok = schedule_accept(),
+    State#state{socket = Socket}.
 
 %% @doc Schedule new TCP connection accept.
 -spec schedule_accept() -> ok.
@@ -201,3 +240,35 @@ registry_loop() ->
         Other ->
             throw({unknown_message, Other})
     end.
+
+%% ----------------------------------------------------------------------
+%% Unit tests
+%% ----------------------------------------------------------------------
+
+-ifdef(TEST).
+
+active_state_test_() ->
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     start_link(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> <<>> end}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop(?MODULE)
+         end,
+     {inorder,
+      [?_assertMatch({ok, _}, gen_tcp:connect("127.1", 5001, [])),
+       ?_assertMatch(ok, set_active(?MODULE, true)),
+       ?_assertMatch({ok, _}, gen_tcp:connect("127.1", 5001, [])),
+       ?_assertMatch(ok, set_active(?MODULE, false)),
+       ?_assertMatch({error, econnrefused}, gen_tcp:connect("127.1", 5001, [])),
+       ?_assertMatch(ok, set_active(?MODULE, true)),
+       ?_assertMatch({ok, _}, gen_tcp:connect("127.1", 5001, []))
+      ]}}.
+
+-endif.

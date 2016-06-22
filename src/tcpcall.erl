@@ -23,6 +23,7 @@
     suspend/2,
     resume/1,
     uplink_cast/2,
+    set_server_active/2,
     stop_server/1,
     stop_client/1,
     stop_pool/1
@@ -257,6 +258,17 @@ uplink_cast(BridgeRef, Data) ->
       fun(PID) ->
               ok = tcpcall_server:uplink_cast(PID, Data)
       end, tcpcall_acceptor:clients(BridgeRef)).
+
+%% @doc Switch server between enabled/disabled state.
+%% When in enabled state, the server is accepting new connections
+%% and works as usual. When switched to disabled state,
+%% the server stops accepting new connections and then
+%% disconnects all connected clients.
+%% Note switching server to disable state is not equal to
+%% stop them!
+-spec set_server_active(BridgeRef :: bridge_ref(), IsActive :: boolean()) -> ok.
+set_server_active(BridgeRef, IsActive) ->
+    ok = tcpcall_acceptor:set_active(BridgeRef, IsActive).
 
 %% @hidden
 %% @doc Tell the server process to stop.
@@ -1053,6 +1065,43 @@ is_connected_test() ->
     ok = stop_server(s),
     ok = timer:sleep(500),
     ?assertNot(is_connected(c)).
+
+active_state_test_() ->
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     listen(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> <<>> end}]),
+                 {ok, _} =
+                     connect(
+                       [{host, "127.1"},
+                        {port, 5001},
+                        {name, c1}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop_server(?MODULE),
+                 ok = stop_client(c1),
+                 %% to avoid port number reuse in other tests
+                 ok = timer:sleep(100)
+         end,
+     {inorder,
+      [{"Warming up",
+        ?_assertMatch(ok, timer:sleep(1000))},
+       {"Test active server",
+        ?_assert(is_connected(c1))},
+       {"Test inactive server",
+        [?_assertMatch(ok, set_server_active(?MODULE, false)),
+         ?_assertMatch(ok, timer:sleep(1000)),
+         ?_assertNot(is_connected(c1))]},
+       {"Enable server again",
+        [?_assertMatch(ok, set_server_active(?MODULE, true)),
+         ?_assertMatch(ok, timer:sleep(1000)),
+         ?_assert(is_connected(c1))]}
+      ]}}.
 
 -spec tcall(BridgeRef :: bridge_ref(),
             Request :: any(),
