@@ -37,6 +37,7 @@
    state,
    {socket :: port() | undefined,
     options :: tcpcall:client_options(),
+    max_parallel_requests :: pos_integer(),
     seq_num = 0 :: seq_num(),
     registry :: registry(),
     lord :: pid() | undefined
@@ -203,14 +204,17 @@ init(Options) ->
         false ->
             ok
     end,
+    MPR = proplists:get_value(max_parallel_requests, Options, 10000),
+    true = 0 < MPR,
     %% a mapping from SeqNum (of arrived reply from the
     %% socket) to RequestRef of the request sent by a
     %% local Erlang process
-    Registry = ets:new(?MODULE, []),
+    Registry = ets:new(?MODULE, [ordered_set]),
     %% schedule connect to the remote host immediately
     _Sent = self() ! ?SIG_CONNECT,
     {ok,
      #state{options = Options,
+            max_parallel_requests = MPR,
             registry = Registry,
             lord = proplists:get_value(lord, Options)}}.
 
@@ -284,7 +288,7 @@ handle_cast(?QUEUE_REQUEST(From, RequestRef, DeadLine, Request), State)
         ok ->
             ok = register_request_from_local_process(
                    State#state.registry, RequestRef,
-                   From, SeqNum),
+                   From, SeqNum, State#state.max_parallel_requests),
             {noreply, State#state{seq_num = SeqNum + 1}};
         {error, Reason} ->
             %% Failed to send. Reply to the local process
@@ -358,10 +362,17 @@ connect(State) ->
         Registry :: registry(),
         RequestRef :: reference(),
         From :: pid(),
-        SeqNum :: seq_num()) -> ok.
-register_request_from_local_process(Registry, RequestRef, From, SeqNum) ->
+        SeqNum :: seq_num(),
+        MaxParallelRequests :: pos_integer()) -> ok.
+register_request_from_local_process(Registry, RequestRef, From, SeqNum, MaxParallelRequests) ->
     true = ets:insert(Registry, {SeqNum, From, RequestRef}),
-    ok.
+    case ets:info(Registry, size) of
+        RecordsCount when MaxParallelRequests < RecordsCount ->
+            true = ets:delete(Registry, ets:first(Registry)),
+            ok;
+        _RecordsCount ->
+            ok
+    end.
 
 %% @doc Lookup RequestRef by the SeqNum and remove the record.
 -spec pop_request_ref(Registry :: registry(), SeqNum :: seq_num()) ->

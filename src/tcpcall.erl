@@ -70,6 +70,7 @@
         {suspend_handler, suspend_handler()} |
         {resume_handler, resume_handler()} |
         {uplink_cast_handler, uplink_cast_handler()} |
+        {max_parallel_requests, pos_integer()} |
         {lord, pid()}.
 
 -type client_pool_name() :: atom().
