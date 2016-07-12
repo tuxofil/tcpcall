@@ -287,8 +287,7 @@ handle_cast(?QUEUE_REQUEST(From, RequestRef, DeadLine, Request), State)
            ?PACKET_REQUEST(SeqNum, DeadLine, Request)) of
         ok ->
             ok = register_request_from_local_process(
-                   State#state.registry, RequestRef,
-                   From, SeqNum, State#state.max_parallel_requests),
+                   State, RequestRef, From, SeqNum),
             {noreply, State#state{seq_num = SeqNum + 1}};
         {error, Reason} ->
             %% Failed to send. Reply to the local process
@@ -359,12 +358,13 @@ connect(State) ->
 
 %% @doc Register request from a local Erlang process.
 -spec register_request_from_local_process(
-        Registry :: registry(),
+        #state{},
         RequestRef :: reference(),
         From :: pid(),
-        SeqNum :: seq_num(),
-        MaxParallelRequests :: pos_integer()) -> ok.
-register_request_from_local_process(Registry, RequestRef, From, SeqNum, MaxParallelRequests) ->
+        SeqNum :: seq_num()) -> ok.
+register_request_from_local_process(State, RequestRef, From, SeqNum) ->
+    Registry = State#state.registry,
+    MaxParallelRequests = State#state.max_parallel_requests,
     true = ets:insert(Registry, {SeqNum, From, RequestRef}),
     case ets:info(Registry, size) of
         RecordsCount when MaxParallelRequests < RecordsCount ->
