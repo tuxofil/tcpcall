@@ -323,8 +323,7 @@ code_change(_OldVsn, State, _Extra) ->
                                   ok | stop.
 handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
     RequestRef = make_ref(),
-    ok = register_request_from_network(
-           State#state.registry, SeqNum, RequestRef, DeadLine),
+    ok = register_request_from_network(State, SeqNum, RequestRef, DeadLine),
     %% relay the request to the receiver process
     case deliver_request(State#state.receiver, RequestRef, Request) of
         ok ->
@@ -351,11 +350,12 @@ handle_data_from_net(_State, _BadOrUnknownPacket) ->
 
 %% @doc Register request arrived from the network.
 -spec register_request_from_network(
-        Registry :: registry(),
+        #state{},
         SeqNum :: seq_num(),
         RequestRef :: reference(),
         DeadLine :: pos_integer()) -> ok.
-register_request_from_network(Registry, SeqNum, RequestRef, DeadLine) ->
+register_request_from_network(State, SeqNum, RequestRef, DeadLine) ->
+    Registry = State#state.registry,
     true = ets:insert(Registry, {RequestRef, SeqNum, DeadLine}),
     ok.
 
