@@ -45,12 +45,14 @@
 -type server_option() ::
         {socket, port()} |
         {acceptor, pid()} |
-        {receiver, tcpcall:receiver()}.
+        {receiver, tcpcall:receiver()} |
+        {max_parallel_requests, pos_integer()}.
 
 -record(
    state,
    {socket :: port(),
     options :: server_options(),
+    max_parallel_requests :: pos_integer(),
     ready = false :: boolean(),
     acceptor_pid :: pid(),
     acceptor_mon :: reference(),
@@ -181,10 +183,13 @@ init(Options) ->
     MonitorRef = monitor(process, AcceptorPid),
     {socket, Socket} = lists:keyfind(socket, 1, Options),
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
+    MPR = proplists:get_value(max_parallel_requests, Options, 10000),
+    true = 0 < MPR,
     {ok,
      #state{socket = Socket,
             ready = false, %% will wait for 'ready' signal
             options = Options,
+            max_parallel_requests = MPR,
             acceptor_pid = AcceptorPid,
             acceptor_mon = MonitorRef,
             receiver = Receiver,
@@ -323,14 +328,28 @@ code_change(_OldVsn, State, _Extra) ->
                                   ok | stop.
 handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
     RequestRef = make_ref(),
-    ok = register_request_from_network(State, SeqNum, RequestRef, DeadLine),
-    %% relay the request to the receiver process
-    case deliver_request(State#state.receiver, RequestRef, Request) of
+    case register_request_from_network(State, SeqNum, RequestRef, DeadLine) of
         ok ->
-            ok;
-        error ->
+            %% relay the request to the receiver process
+            case deliver_request(State#state.receiver, RequestRef, Request) of
+                ok ->
+                    ok;
+                error ->
+                    %% immediately reply to the remote side with error
+                    Reply = term_to_binary(no_proc),
+                    case gen_tcp:send(
+                           State#state.socket,
+                           ?PACKET_ERROR(SeqNum, Reply)) of
+                        ok ->
+                            ok;
+                        {error, _Reason} ->
+                            %% connection is broken. Terminate.
+                            stop
+                    end
+            end;
+        overload ->
             %% immediately reply to the remote side with error
-            Reply = term_to_binary(no_proc),
+            Reply = term_to_binary(overload),
             case gen_tcp:send(
                    State#state.socket,
                    ?PACKET_ERROR(SeqNum, Reply)) of
@@ -353,11 +372,17 @@ handle_data_from_net(_State, _BadOrUnknownPacket) ->
         #state{},
         SeqNum :: seq_num(),
         RequestRef :: reference(),
-        DeadLine :: pos_integer()) -> ok.
+        DeadLine :: pos_integer()) -> ok | overload.
 register_request_from_network(State, SeqNum, RequestRef, DeadLine) ->
     Registry = State#state.registry,
-    true = ets:insert(Registry, {RequestRef, SeqNum, DeadLine}),
-    ok.
+    MaxParallelRequests = State#state.max_parallel_requests,
+    case ets:info(Registry, size) of
+        RecordsCount when MaxParallelRequests =< RecordsCount ->
+            overload;
+        _RecordsCount ->
+            true = ets:insert(Registry, {RequestRef, SeqNum, DeadLine}),
+            ok
+    end.
 
 %% @doc Deliver request received from the remote side (the client)
 %% to the local receiver process.

@@ -35,7 +35,9 @@
 -record(state,
         {bind_port :: inet:port_number(),
          socket :: port(),
-         receiver :: tcpcall:receiver()}).
+         receiver :: tcpcall:receiver(),
+         max_parallel_requests :: pos_integer()
+        }).
 
 %% --------------------------------------------------------------------
 %% API functions
@@ -106,10 +108,13 @@ init(Options) ->
     end,
     {bind_port, BindPort} = lists:keyfind(bind_port, 1, Options),
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
+    MPR = proplists:get_value(max_parallel_requests, Options, 10000),
+    true = 0 < MPR,
     InitialState =
         #state{
            bind_port = BindPort,
-           receiver = Receiver},
+           receiver = Receiver,
+           max_parallel_requests = MPR},
     {ok, listen(InitialState)}.
 
 %% @hidden
@@ -128,7 +133,9 @@ handle_info(?SIG_ACCEPT, State) when State#state.socket /= undefined ->
             ok = tcpcall_server:start(
                    [{socket, Socket},
                     {acceptor, self()},
-                    {receiver, State#state.receiver}]);
+                    {receiver, State#state.receiver},
+                    {max_parallel_requests, State#state.max_parallel_requests}
+                   ]);
         {error, timeout} ->
             ok
     end,
