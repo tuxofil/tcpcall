@@ -363,12 +363,19 @@ connect(State) ->
         From :: pid(),
         SeqNum :: seq_num()) -> ok.
 register_request_from_local_process(State, RequestRef, From, SeqNum) ->
+    %% If request registry is full, drop the eldest record from it.
     Registry = State#state.registry,
     MaxParallelRequests = State#state.max_parallel_requests,
     true = ets:insert(Registry, {SeqNum, From, RequestRef}),
     case ets:info(Registry, size) of
         RecordsCount when MaxParallelRequests < RecordsCount ->
-            true = ets:delete(Registry, ets:first(Registry)),
+            OldSeqNum = ets:first(Registry),
+            %% remove the eldest record from the registry,
+            %% and send 'timeout' error to the caller process
+            [{OldSeqNum, OldFrom, OldRequestRef}] =
+                ets:lookup(Registry, OldSeqNum),
+            _Sent = OldFrom ! ?ARRIVE_ERROR(OldRequestRef, timeout),
+            true = ets:delete(Registry, OldSeqNum),
             ok;
         _RecordsCount ->
             ok
