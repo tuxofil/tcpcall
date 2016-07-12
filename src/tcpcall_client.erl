@@ -38,6 +38,7 @@
    {socket :: port() | undefined,
     options :: tcpcall:client_options(),
     max_parallel_requests :: pos_integer(),
+    max_parallel_requests_policy :: drop_old | deny_new,
     seq_num = 0 :: seq_num(),
     registry :: registry(),
     lord :: pid() | undefined
@@ -206,6 +207,7 @@ init(Options) ->
     end,
     MPR = proplists:get_value(max_parallel_requests, Options, 10000),
     true = 0 < MPR,
+    MPRP = proplists:get_value(max_parallel_requests_policy, Options, ?drop_old),
     %% a mapping from SeqNum (of arrived reply from the
     %% socket) to RequestRef of the request sent by a
     %% local Erlang process
@@ -215,6 +217,7 @@ init(Options) ->
     {ok,
      #state{options = Options,
             max_parallel_requests = MPR,
+            max_parallel_requests_policy = MPRP,
             registry = Registry,
             lord = proplists:get_value(lord, Options)}}.
 
@@ -282,18 +285,25 @@ handle_cast(?QUEUE_REQUEST(From, RequestRef, DeadLine, Request), State)
            true ->
                 State#state.seq_num
         end,
-    case gen_tcp:send(
-           State#state.socket,
-           ?PACKET_REQUEST(SeqNum, DeadLine, Request)) of
+    case register_request_from_local_process(State, RequestRef, From, SeqNum) of
         ok ->
-            ok = register_request_from_local_process(
-                   State, RequestRef, From, SeqNum),
-            {noreply, State#state{seq_num = SeqNum + 1}};
-        {error, Reason} ->
-            %% Failed to send. Reply to the local process
-            %% immediately and try to reconnect.
-            _Sent = From ! ?ARRIVE_ERROR(RequestRef, Reason),
-            {noreply, connect(State)}
+            case gen_tcp:send(
+                   State#state.socket,
+                   ?PACKET_REQUEST(SeqNum, DeadLine, Request)) of
+                ok ->
+                    {noreply, State#state{seq_num = SeqNum + 1}};
+                {error, Reason} ->
+                    %% Failed to send. Reply to the local process
+                    %% immediately and try to reconnect.
+                    _Sent = From ! ?ARRIVE_ERROR(RequestRef, Reason),
+                    true = ets:delete(State#state.registry, SeqNum),
+                    {noreply, connect(State)}
+            end;
+        overload ->
+            %% Request registry is overloaded.
+            %% Reply to the local process immediately.
+            _Sent = From ! ?ARRIVE_ERROR(RequestRef, overload),
+            {noreply, State}
     end;
 handle_cast(?QUEUE_REQUEST(From, RequestRef, _DeadLine, _Request), State) ->
     %% not connected. Reply to the caller immediately.
@@ -361,7 +371,20 @@ connect(State) ->
         #state{},
         RequestRef :: reference(),
         From :: pid(),
-        SeqNum :: seq_num()) -> ok.
+        SeqNum :: seq_num()) -> ok | overload.
+register_request_from_local_process(State, RequestRef, From, SeqNum)
+  when State#state.max_parallel_requests_policy == ?deny_new ->
+    %% If request registry is full, do not register new request
+    %% and reply immediately with 'overload'
+    Registry = State#state.registry,
+    MaxParallelRequests = State#state.max_parallel_requests,
+    case ets:info(Registry, size) of
+        RecordsCount when MaxParallelRequests =< RecordsCount ->
+            overload;
+        _RecordsCount ->
+            true = ets:insert(Registry, {SeqNum, From, RequestRef}),
+            ok
+    end;
 register_request_from_local_process(State, RequestRef, From, SeqNum) ->
     %% If request registry is full, drop the eldest record from it.
     Registry = State#state.registry,
