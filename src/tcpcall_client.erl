@@ -205,9 +205,15 @@ init(Options) ->
         false ->
             ok
     end,
-    MPR = proplists:get_value(max_parallel_requests, Options, 10000),
+    DefaultMPR =
+        application:get_env(
+          tcpcall, client_default_max_parallel_requests, 10000),
+    MPR = proplists:get_value(max_parallel_requests, Options, DefaultMPR),
     true = 0 < MPR,
-    MPRP = proplists:get_value(max_parallel_requests_policy, Options, ?drop_old),
+    DefaultMPRP =
+        application:get_env(
+          tcpcall, client_default_max_parallel_requests_policy, ?drop_old),
+    MPRP = proplists:get_value(max_parallel_requests_policy, Options, DefaultMPRP),
     %% a mapping from SeqNum (of arrived reply from the
     %% socket) to RequestRef of the request sent by a
     %% local Erlang process

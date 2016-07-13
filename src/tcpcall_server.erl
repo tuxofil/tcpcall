@@ -183,7 +183,10 @@ init(Options) ->
     MonitorRef = monitor(process, AcceptorPid),
     {socket, Socket} = lists:keyfind(socket, 1, Options),
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
-    MPR = proplists:get_value(max_parallel_requests, Options, 10000),
+    DefaultMPR =
+        application:get_env(
+          tcpcall, server_default_max_parallel_requests, 10000),
+    MPR = proplists:get_value(max_parallel_requests, Options, DefaultMPR),
     true = 0 < MPR,
     {ok,
      #state{socket = Socket,
