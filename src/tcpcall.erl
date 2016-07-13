@@ -83,7 +83,9 @@
         {peers, [peer()]} |
         {peers, peers_getter(), Seconds :: pos_integer()} |
         {balancer, balancer()} |
-        {uplink_cast_handler, uplink_cast_handler()}.
+        {uplink_cast_handler, uplink_cast_handler()} |
+        {max_parallel_requests, pos_integer()} |
+        {max_parallel_requests_policy, ?drop_old | ?deny_new}.
 
 -type peer() ::
         {host(), inet:port_number()}.
@@ -1187,6 +1189,93 @@ client_max_parallel_requests_with_deny_policy_test_() ->
                 _ = spawn(fun() -> Self ! {r3, call(c1, <<>>, 2000)} end),
                 ok = timer:sleep(10),
                 _ = spawn(fun() -> Self ! {r4, call(c1, <<>>, 2000)} end),
+                R1 = receive {r1, R1_0} -> R1_0 after 2500 -> throw(no_r1) end,
+                R2 = receive {r2, R2_0} -> R2_0 after 2500 -> throw(no_r2) end,
+                R3 = receive {r3, R3_0} -> R3_0 after 2500 -> throw(no_r3) end,
+                R4 = receive {r4, R4_0} -> R4_0 after 2500 -> throw(no_r4) end,
+                ?assertMatch({ok, <<>>}, R1),
+                ?assertMatch({ok, <<>>}, R2),
+                ?assertMatch({error, overload}, R3),
+                ?assertMatch({error, overload}, R4)
+        end}
+      ]}}.
+
+pool_max_parallel_requests_test_() ->
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     listen(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> ok = timer:sleep(1000), <<>> end}]),
+                 {ok, _} =
+                     connect_pool(
+                       c1, [{peers, [{"127.1", 5001}]},
+                            {max_parallel_requests, 2}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop_server(?MODULE),
+                 ok = stop_pool(c1),
+                 %% to avoid port number reuse in other tests
+                 ok = timer:sleep(100)
+         end,
+     {inorder,
+      [{"Warming up",
+        ?_assertMatch(ok, timer:sleep(1000))},
+       {timeout, 20,
+        fun() ->
+                Self = self(),
+                _ = spawn(fun() -> Self ! {r1, call_pool(c1, <<>>, 2000)} end),
+                ok = timer:sleep(10),
+                _ = spawn(fun() -> Self ! {r2, call_pool(c1, <<>>, 2000)} end),
+                ok = timer:sleep(10),
+                _ = spawn(fun() -> Self ! {r3, call_pool(c1, <<>>, 2000)} end),
+                R1 = receive {r1, R1_0} -> R1_0 after 2500 -> throw(no_r1) end,
+                R2 = receive {r2, R2_0} -> R2_0 after 2500 -> throw(no_r2) end,
+                R3 = receive {r3, R3_0} -> R3_0 after 2500 -> throw(no_r3) end,
+                ?assertMatch({error, timeout}, R1),
+                ?assertMatch({ok, <<>>}, R2),
+                ?assertMatch({ok, <<>>}, R3)
+        end}
+      ]}}.
+
+pool_max_parallel_requests_with_deny_policy_test_() ->
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     listen(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> ok = timer:sleep(1000), <<>> end}]),
+                 {ok, _} =
+                     connect_pool(
+                       c1, [{peers, [{"127.1", 5001}]},
+                            {max_parallel_requests, 2},
+                            {max_parallel_requests_policy, ?deny_new}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop_server(?MODULE),
+                 ok = stop_pool(c1),
+                 %% to avoid port number reuse in other tests
+                 ok = timer:sleep(100)
+         end,
+     {inorder,
+      [{"Warming up",
+        ?_assertMatch(ok, timer:sleep(1000))},
+       {timeout, 20,
+        fun() ->
+                Self = self(),
+                _ = spawn(fun() -> Self ! {r1, call_pool(c1, <<>>, 2000)} end),
+                ok = timer:sleep(10),
+                _ = spawn(fun() -> Self ! {r2, call_pool(c1, <<>>, 2000)} end),
+                ok = timer:sleep(10),
+                _ = spawn(fun() -> Self ! {r3, call_pool(c1, <<>>, 2000)} end),
+                ok = timer:sleep(10),
+                _ = spawn(fun() -> Self ! {r4, call_pool(c1, <<>>, 2000)} end),
                 R1 = receive {r1, R1_0} -> R1_0 after 2500 -> throw(no_r1) end,
                 R2 = receive {r2, R2_0} -> R2_0 after 2500 -> throw(no_r2) end,
                 R3 = receive {r3, R3_0} -> R3_0 after 2500 -> throw(no_r3) end,

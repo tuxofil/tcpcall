@@ -185,11 +185,17 @@ handle_info(?SIG_SPAWN({_No, {Host, Port}} = Peer), State) ->
           uplink_cast_handler, State#state.options, fun(_) -> ok end),
     case lists:member(Peer, State#state.peers) of
         true ->
+            ExtraOptions =
+                [Option ||
+                    {K, _} = Option <- State#state.options,
+                    lists:member(K, [max_parallel_requests,
+                                     max_parallel_requests_policy])],
             case tcpcall:connect(
                    [{host, Host}, {port, Port}, {lord, self()},
                     {suspend_handler, self()},
                     {resume_handler, self()},
-                    {uplink_cast_handler, UplinkCastHandler}]) of
+                    {uplink_cast_handler, UplinkCastHandler}] ++
+                       ExtraOptions) of
                 {ok, Pid} ->
                     NewState =
                         State#state{
