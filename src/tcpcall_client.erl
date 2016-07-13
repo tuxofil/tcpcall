@@ -265,7 +265,7 @@ handle_info(?SIG_CONNECT, State) ->
     {noreply, connect(State)};
 handle_info(?SIG_STOP, State) ->
     ok = lord_report(State, false),
-    {stop, _Reason = normal, State};
+    {stop, normal, State};
 handle_info({tcp_closed, Socket}, State)
   when Socket == State#state.socket ->
     ok = lord_report(State, false),

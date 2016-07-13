@@ -209,23 +209,23 @@ handle_info({tcp, Socket, Data}, State)
         ok ->
             {noreply, State};
         stop ->
-            {stop, _Reason = normal, State}
+            {stop, normal, State}
     end;
 handle_info(?SIG_SELF_DESTRUCT, State) when not State#state.ready ->
     %% The 'self_destruct' signal arrived before the
     %% 'ready' signal. Something went wrong, cannot continue.
-    {stop, _Reason = normal, State};
+    {stop, normal, State};
 handle_info({tcp_closed, Socket}, State)
   when Socket == State#state.socket ->
-    {stop, _Reason = normal, State};
+    {stop, normal, State};
 handle_info({tcp_error, Socket, _Reason}, State)
   when Socket == State#state.socket ->
-    {stop, _Reason = normal, State};
+    {stop, normal, State};
 handle_info({'DOWN', MonitorRef, process, AcceptorPid, _Reason}, State)
   when MonitorRef == State#state.acceptor_mon,
        AcceptorPid == State#state.acceptor_pid ->
     %% connection acceptor process is down.
-    {stop, _MyReason = normal, State};
+    {stop, normal, State};
 handle_info(_Request, State) ->
     {noreply, State}.
 
@@ -243,7 +243,7 @@ handle_cast(?QUEUE_REPLY(RequestRef, Reply), State) ->
                 ok ->
                     {noreply, State};
                 {error, _Reason} ->
-                    {stop, _Reason = normal, State}
+                    {stop, normal, State}
             end;
         undefined ->
             {noreply, State}
@@ -258,7 +258,7 @@ handle_cast(?QUEUE_ERROR(RequestRef, Reason), State) ->
                 ok ->
                     {noreply, State};
                 {error, _Reason} ->
-                    {stop, _Reason = normal, State}
+                    {stop, normal, State}
             end;
         undefined ->
             {noreply, State}
@@ -281,7 +281,7 @@ handle_cast(?SUSPEND(Millis), State) ->
         ok ->
             {noreply, State};
         {error, _Reason} ->
-            {stop, _Reason = normal, State}
+            {stop, normal, State}
     end;
 handle_cast(?RESUME, State) ->
     case gen_tcp:send(
@@ -289,7 +289,7 @@ handle_cast(?RESUME, State) ->
         ok ->
             {noreply, State};
         {error, _Reason} ->
-            {stop, _Reason = normal, State}
+            {stop, normal, State}
     end;
 handle_cast(?QUEUE_UPLINK_CAST(Data), State) ->
     case gen_tcp:send(
@@ -297,7 +297,7 @@ handle_cast(?QUEUE_UPLINK_CAST(Data), State) ->
         ok ->
             {noreply, State};
         {error, _Reason} ->
-            {stop, _Reason = normal, State}
+            {stop, normal, State}
     end;
 handle_cast(_Request, State) ->
     {noreply, State}.
