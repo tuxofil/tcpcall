@@ -1,3 +1,17 @@
+erlang-tcpcall (1.2.0) unstable; urgency=low
+
+  * fix rare badmatch crashes
+  * do not hardcode defaults, allow to configure them
+  * pool: allow to use max_parallel_requests* options
+  * add client side max_parallel_requests_policy option
+  * add server side max_parallel_requests option
+  * minor refactor in server process
+  * client side max_parallel_requests: minor optimization
+  * minor refactor in client process
+  * cover max_parallel_requests option with unit test
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Thu, 14 Jul 2016 12:32:31 +0300
+
 erlang-tcpcall (1.1.0) unstable; urgency=low
 
   * fix overflow of client internal registry
