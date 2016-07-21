@@ -60,7 +60,8 @@
         {bind_port, inet:port_number()} |
         {receiver, receiver()} |
         {name, RegisteredName :: atom()} |
-        {max_parallel_requests, pos_integer()}.
+        {max_parallel_requests, pos_integer()} |
+        {overflow_suspend_period, Millis :: pos_integer()}.
 
 -type client_options() :: [client_option()].
 
@@ -1331,6 +1332,46 @@ server_max_parallel_requests_test_() ->
                 ?assertMatch({ok, <<>>}, R2),
                 ?assertMatch({error, overload}, R3),
                 ?assertMatch({error, overload}, R4)
+        end}
+      ]}}.
+
+server_overflow_suspend_period_test_() ->
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     listen(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> ok = timer:sleep(1000), <<>> end},
+                        {max_parallel_requests, 2},
+                        {overflow_suspend_period, 2000}]),
+                 {ok, _} =
+                     connect_pool(c1, [{peers, [{"127.1", 5001}]}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop_server(?MODULE),
+                 ok = stop_pool(c1),
+                 %% to avoid port number reuse in other tests
+                 ok = timer:sleep(100)
+         end,
+     {inorder,
+      [{"Warming up",
+        ?_assertMatch(ok, timer:sleep(1000))},
+       {timeout, 20,
+        fun() ->
+                ok = cast_pool(c1, <<>>),
+                ok = timer:sleep(10),
+                ok = cast_pool(c1, <<>>),
+                ok = timer:sleep(10),
+                %% its a normal behaviour of pool - report not_connected
+                %% when all clients has gone due to suspend
+                {error, not_connected} = cast_pool(c1, <<>>),
+                ok = timer:sleep(1000),
+                {error, not_connected} = cast_pool(c1, <<>>),
+                ok = timer:sleep(1000),
+                ok = cast_pool(c1, <<>>)
         end}
       ]}}.
 

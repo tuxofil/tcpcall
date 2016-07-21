@@ -46,13 +46,15 @@
         {socket, port()} |
         {acceptor, pid()} |
         {receiver, tcpcall:receiver()} |
-        {max_parallel_requests, pos_integer()}.
+        {max_parallel_requests, pos_integer()} |
+        {overflow_suspend_period, Millis :: pos_integer()}.
 
 -record(
    state,
    {socket :: port(),
     options :: server_options(),
     max_parallel_requests :: pos_integer(),
+    overflow_suspend_period :: Millis :: pos_integer(),
     ready = false :: boolean(),
     acceptor_pid :: pid(),
     acceptor_mon :: reference(),
@@ -65,6 +67,9 @@
 %% internal signals
 -define(SIG_READY, ready).
 -define(SIG_SELF_DESTRUCT, self_destruct).
+
+%% gauge for spawned workers for cast requests
+-define(async_workers, async_workers).
 
 %% ----------------------------------------------------------------------
 %% Erlang interface definitions
@@ -185,11 +190,16 @@ init(Options) ->
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
     MPR = proplists:get_value(max_parallel_requests, Options),
     true = 0 < MPR,
+    OSP = proplists:get_value(overflow_suspend_period, Options),
+    true = 0 < OSP,
+    %% initialize gauge for spawned cast workers
+    undefined = put(?async_workers, 0),
     {ok,
      #state{socket = Socket,
             ready = false, %% will wait for 'ready' signal
             options = Options,
             max_parallel_requests = MPR,
+            overflow_suspend_period = OSP,
             acceptor_pid = AcceptorPid,
             acceptor_mon = MonitorRef,
             receiver = Receiver,
@@ -223,6 +233,11 @@ handle_info({'DOWN', MonitorRef, process, AcceptorPid, _Reason}, State)
        AcceptorPid == State#state.acceptor_pid ->
     %% connection acceptor process is down.
     {stop, normal, State};
+handle_info({'DOWN', _MonRef, process, _CastWorkerPid, _Reason}, State) ->
+    %% only spawned workers for cast requests are being monitored
+    %% except Acceptor process. Decrement gauge.
+    _OldValue = put(?async_workers, get(?async_workers) - 1),
+    {noreply, State};
 handle_info(_Request, State) ->
     {noreply, State}.
 
@@ -362,7 +377,10 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
     end;
 handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
     %% relay the cast to the receiver process
-    deliver_cast(State#state.receiver, Request);
+    ok = deliver_cast(State#state.receiver, Request),
+    is_overloaded(State) andalso
+        suspend(self(), State#state.overflow_suspend_period),
+    ok;
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
     ok.
@@ -374,13 +392,11 @@ handle_data_from_net(_State, _BadOrUnknownPacket) ->
         RequestRef :: reference(),
         DeadLine :: pos_integer()) -> ok | overload.
 register_request_from_network(State, SeqNum, RequestRef, DeadLine) ->
-    Registry = State#state.registry,
-    MaxParallelRequests = State#state.max_parallel_requests,
-    case ets:info(Registry, size) of
-        RecordsCount when MaxParallelRequests =< RecordsCount ->
+    case is_overloaded(State) of
+        true ->
             overload;
-        _RecordsCount ->
-            true = ets:insert(Registry, {RequestRef, SeqNum, DeadLine}),
+        false ->
+            true = ets:insert(State#state.registry, {RequestRef, SeqNum, DeadLine}),
             ok
     end.
 
@@ -453,12 +469,14 @@ deliver_cast(Pid, Request) when is_pid(Pid) ->
     end;
 deliver_cast(FunObject, Request)
   when is_function(FunObject, 1) ->
-    _Pid =
+    Pid =
         spawn_link(
           fun() ->
                   _Ignored = (catch FunObject(Request)),
                   ok
           end),
+    _MonRef = monitor(process, Pid),
+    _OldValue = put(?async_workers, get(?async_workers) + 1),
     ok.
 
 %% @doc Lookup SeqNum by RequestRef and remove it from the
@@ -497,3 +515,17 @@ vacuum(Registry) ->
                   Accum
           end, undefined, Registry),
     ok.
+
+%% @doc Return 'true' when configured max count of worker processes
+%% is less than count of actually running workers.
+-spec is_overloaded(#state{}) -> boolean().
+is_overloaded(State) ->
+    State#state.max_parallel_requests =< workers_count(State).
+
+%% @doc Return total count of running workers. This include
+%% workers for sync requests and workers for casts (async requests).
+-spec workers_count(#state{}) -> non_neg_integer().
+workers_count(State) ->
+    RegisteredSyncRequests = ets:info(State#state.registry, size),
+    SpawnedAsyncRequests = get(?async_workers),
+    RegisteredSyncRequests + SpawnedAsyncRequests.

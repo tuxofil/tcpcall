@@ -36,7 +36,8 @@
         {bind_port :: inet:port_number(),
          socket :: port(),
          receiver :: tcpcall:receiver(),
-         max_parallel_requests :: pos_integer()
+         max_parallel_requests :: pos_integer(),
+         overflow_suspend_period :: Millis :: pos_integer()
         }).
 
 %% --------------------------------------------------------------------
@@ -113,11 +114,17 @@ init(Options) ->
           tcpcall, server_default_max_parallel_requests, 10000),
     MPR = proplists:get_value(max_parallel_requests, Options, DefaultMPR),
     true = 0 < MPR,
+    DefaultOSP =
+        application:get_env(
+          tcpcall, server_default_overflow_suspend_period, 5000),
+    OSP = proplists:get_value(overflow_suspend_period, Options, DefaultOSP),
+    true = 0 < OSP,
     InitialState =
         #state{
            bind_port = BindPort,
            receiver = Receiver,
-           max_parallel_requests = MPR},
+           max_parallel_requests = MPR,
+           overflow_suspend_period = OSP},
     {ok, listen(InitialState)}.
 
 %% @hidden
@@ -137,7 +144,8 @@ handle_info(?SIG_ACCEPT, State) when State#state.socket /= undefined ->
                    [{socket, Socket},
                     {acceptor, self()},
                     {receiver, State#state.receiver},
-                    {max_parallel_requests, State#state.max_parallel_requests}
+                    {max_parallel_requests, State#state.max_parallel_requests},
+                    {overflow_suspend_period, State#state.overflow_suspend_period}
                    ]);
         {error, timeout} ->
             ok
