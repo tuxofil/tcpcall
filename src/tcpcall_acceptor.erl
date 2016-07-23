@@ -36,8 +36,8 @@
         {bind_port :: inet:port_number(),
          socket :: port(),
          receiver :: tcpcall:receiver(),
-         max_parallel_requests :: pos_integer(),
-         overflow_suspend_period :: Millis :: pos_integer()
+         max_parallel_requests :: tcpcall:max_parallel_requests(),
+         overflow_suspend_period :: tcpcall:overflow_suspend_period()
         }).
 
 %% --------------------------------------------------------------------
@@ -113,12 +113,10 @@ init(Options) ->
         application:get_env(
           tcpcall, server_default_max_parallel_requests, 10000),
     MPR = proplists:get_value(max_parallel_requests, Options, DefaultMPR),
-    true = 0 < MPR,
     DefaultOSP =
         application:get_env(
           tcpcall, server_default_overflow_suspend_period, 5000),
     OSP = proplists:get_value(overflow_suspend_period, Options, DefaultOSP),
-    true = 0 < OSP,
     InitialState =
         #state{
            bind_port = BindPort,

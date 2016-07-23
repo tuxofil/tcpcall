@@ -46,15 +46,15 @@
         {socket, port()} |
         {acceptor, pid()} |
         {receiver, tcpcall:receiver()} |
-        {max_parallel_requests, pos_integer()} |
-        {overflow_suspend_period, Millis :: pos_integer()}.
+        {max_parallel_requests, tcpcall:max_parallel_requests()} |
+        {overflow_suspend_period, tcpcall:overflow_suspend_period()}.
 
 -record(
    state,
    {socket :: port(),
     options :: server_options(),
-    max_parallel_requests :: pos_integer(),
-    overflow_suspend_period :: Millis :: pos_integer(),
+    max_parallel_requests :: tcpcall:max_parallel_requests(),
+    overflow_suspend_period :: tcpcall:overflow_suspend_period(),
     ready = false :: boolean(),
     acceptor_pid :: pid(),
     acceptor_mon :: reference(),
@@ -189,9 +189,7 @@ init(Options) ->
     {socket, Socket} = lists:keyfind(socket, 1, Options),
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
     MPR = proplists:get_value(max_parallel_requests, Options),
-    true = 0 < MPR,
     OSP = proplists:get_value(overflow_suspend_period, Options),
-    true = 0 < OSP,
     %% initialize gauge for spawned cast workers
     undefined = put(?async_workers, 0),
     {ok,
@@ -378,8 +376,15 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
 handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
     %% relay the cast to the receiver process
     ok = deliver_cast(State#state.receiver, Request),
+    OSP = State#state.overflow_suspend_period,
     is_overloaded(State) andalso
-        suspend(self(), State#state.overflow_suspend_period),
+        suspend(
+          self(),
+          if is_integer(OSP) ->
+                  OSP;
+             is_function(OSP, 0) ->
+                  OSP()
+          end),
     ok;
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
@@ -520,7 +525,12 @@ vacuum(Registry) ->
 %% is less than count of actually running workers.
 -spec is_overloaded(#state{}) -> boolean().
 is_overloaded(State) ->
-    State#state.max_parallel_requests =< workers_count(State).
+    MPR = State#state.max_parallel_requests,
+    if is_integer(MPR) ->
+            MPR =< workers_count(State);
+       is_function(MPR, 0) ->
+            MPR() =< workers_count(State)
+    end.
 
 %% @doc Return total count of running workers. This include
 %% workers for sync requests and workers for casts (async requests).

@@ -37,8 +37,8 @@
    state,
    {socket :: port() | undefined,
     options :: tcpcall:client_options(),
-    max_parallel_requests :: pos_integer(),
-    max_parallel_requests_policy :: drop_old | deny_new,
+    max_parallel_requests :: tcpcall:max_parallel_requests(),
+    max_parallel_requests_policy :: tcpcall:max_parallel_requests_policy(),
     seq_num = 0 :: seq_num(),
     registry :: registry(),
     lord :: pid() | undefined
@@ -209,7 +209,6 @@ init(Options) ->
         application:get_env(
           tcpcall, client_default_max_parallel_requests, 10000),
     MPR = proplists:get_value(max_parallel_requests, Options, DefaultMPR),
-    true = 0 < MPR,
     DefaultMPRP =
         application:get_env(
           tcpcall, client_default_max_parallel_requests_policy, ?drop_old),
@@ -378,36 +377,49 @@ connect(State) ->
         RequestRef :: reference(),
         From :: pid(),
         SeqNum :: seq_num()) -> ok | overload.
-register_request_from_local_process(State, RequestRef, From, SeqNum)
-  when State#state.max_parallel_requests_policy == ?deny_new ->
-    %% If request registry is full, do not register new request
-    %% and reply immediately with 'overload'
-    Registry = State#state.registry,
-    MaxParallelRequests = State#state.max_parallel_requests,
-    case ets:info(Registry, size) of
-        RecordsCount when MaxParallelRequests =< RecordsCount ->
-            overload;
-        _RecordsCount ->
-            true = ets:insert(Registry, {SeqNum, From, RequestRef}),
-            ok
-    end;
 register_request_from_local_process(State, RequestRef, From, SeqNum) ->
-    %% If request registry is full, drop the eldest record from it.
     Registry = State#state.registry,
-    MaxParallelRequests = State#state.max_parallel_requests,
-    true = ets:insert(Registry, {SeqNum, From, RequestRef}),
-    case ets:info(Registry, size) of
-        RecordsCount when MaxParallelRequests < RecordsCount ->
-            OldSeqNum = ets:first(Registry),
-            %% remove the eldest record from the registry,
-            %% and send 'timeout' error to the caller process
-            [{OldSeqNum, OldFrom, OldRequestRef}] =
-                ets:lookup(Registry, OldSeqNum),
-            _Sent = OldFrom ! ?ARRIVE_ERROR(OldRequestRef, timeout),
-            true = ets:delete(Registry, OldSeqNum),
-            ok;
-        _RecordsCount ->
-            ok
+    MPR = State#state.max_parallel_requests,
+    MaxParallelRequests =
+        if is_integer(MPR) ->
+                MPR;
+           is_function(MPR, 0) ->
+                MPR()
+        end,
+    MPRP = State#state.max_parallel_requests_policy,
+    MaxParallelRequestsPolicy =
+        if is_atom(MPRP) ->
+                MPRP;
+           is_function(MPRP, 0) ->
+                MPRP()
+        end,
+    case MaxParallelRequestsPolicy of
+        ?deny_new ->
+            %% If request registry is full, do not register new request
+            %% and reply immediately with 'overload'
+            case ets:info(Registry, size) of
+                RecordsCount when MaxParallelRequests =< RecordsCount ->
+                    overload;
+                _RecordsCount ->
+                    true = ets:insert(Registry, {SeqNum, From, RequestRef}),
+                    ok
+            end;
+        ?drop_old ->
+            %% If request registry is full, drop the eldest record from it.
+            true = ets:insert(Registry, {SeqNum, From, RequestRef}),
+            case ets:info(Registry, size) of
+                RecordsCount when MaxParallelRequests < RecordsCount ->
+                    OldSeqNum = ets:first(Registry),
+                    %% remove the eldest record from the registry,
+                    %% and send 'timeout' error to the caller process
+                    [{OldSeqNum, OldFrom, OldRequestRef}] =
+                        ets:lookup(Registry, OldSeqNum),
+                    _Sent = OldFrom ! ?ARRIVE_ERROR(OldRequestRef, timeout),
+                    true = ets:delete(Registry, OldSeqNum),
+                    ok;
+                _RecordsCount ->
+                    ok
+            end
     end.
 
 %% @doc Lookup RequestRef by the SeqNum and remove the record.
