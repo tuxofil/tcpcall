@@ -54,7 +54,9 @@
     data/0,
     max_parallel_requests/0,
     max_parallel_requests_policy/0,
-    overflow_suspend_period/0
+    overflow_suspend_period/0,
+    max_message_queue_len/0,
+    queue_overflow_suspend_period/0
    ]).
 
 -type listen_options() :: [listen_option()].
@@ -64,7 +66,9 @@
         {receiver, receiver()} |
         {name, RegisteredName :: atom()} |
         {max_parallel_requests, max_parallel_requests()} |
-        {overflow_suspend_period, overflow_suspend_period()}.
+        {overflow_suspend_period, overflow_suspend_period()} |
+        {max_message_queue_len, max_message_queue_len()} |
+        {queue_overflow_suspend_period, queue_overflow_suspend_period()}.
 
 -type client_options() :: [client_option()].
 
@@ -137,6 +141,14 @@
         (Lazy :: fun(() -> ?drop_old | ?deny_new)).
 
 -type overflow_suspend_period() ::
+        (Static :: (Millis :: pos_integer())) |
+        (Lazy :: fun(() -> Millis :: pos_integer())).
+
+-type max_message_queue_len() ::
+        (Static :: pos_integer()) |
+        (Lazy :: fun(() -> pos_integer())).
+
+-type queue_overflow_suspend_period() ::
         (Static :: (Millis :: pos_integer())) |
         (Lazy :: fun(() -> Millis :: pos_integer())).
 
@@ -1653,6 +1665,106 @@ server_overflow_suspend_period__lazy__test_() ->
                 {error, not_connected} = cast_pool(c1, <<>>),
                 ok = timer:sleep(1000),
                 ok = cast_pool(c1, <<>>)
+        end}
+      ]}}.
+
+server_max_message_queue_len_test_() ->
+    QOSP = 12345,
+    RegName = server_max_message_queue_len__suspend_handler,
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     listen(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> ok = timer:sleep(1000), <<>> end},
+                        %% so small value for max_message_queue_len will trigger
+                        %% 'suspend' signal from server to clients
+                        {max_message_queue_len, 1},
+                        {queue_overflow_suspend_period, QOSP}]),
+                 {ok, _} =
+                     connect([{host, "127.1"},
+                              {port, 5001},
+                              {name, c1},
+                              {suspend_handler, RegName}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop_server(?MODULE),
+                 ok = stop_client(c1),
+                 %% to avoid port number reuse in other tests
+                 ok = timer:sleep(100)
+         end,
+     {inorder,
+      [{"Warming up",
+        ?_assertMatch(ok, timer:sleep(1000))},
+       {timeout, 20,
+        fun() ->
+                true = register(RegName, self()),
+                lists:foreach(
+                  fun(_) ->
+                          spawn_link(fun() -> cast(c1, <<>>) end)
+                  end, lists:seq(1, 5000)),
+                ok = timer:sleep(100),
+                %% server was flooded with requests, and sent back to the
+                %% clients 'suspend' flow control signal:
+                receive
+                    {tcpcall_suspend, _, QOSP} ->
+                        ok
+                after 1000 ->
+                        throw(no_suspend_signal)
+                end
+        end}
+      ]}}.
+
+server_max_message_queue_len__lazy__test_() ->
+    QOSP = 12345,
+    RegName = server_max_message_queue_len__lazy__suspend_handler,
+    {setup,
+     _StartUp =
+         fun() ->
+                 {ok, _} =
+                     listen(
+                       [{name, ?MODULE},
+                        {bind_port, 5001},
+                        {receiver, fun(_) -> ok = timer:sleep(1000), <<>> end},
+                        %% so small value for max_message_queue_len will trigger
+                        %% 'suspend' signal from server to clients
+                        {max_message_queue_len, fun() -> 1 end},
+                        {queue_overflow_suspend_period, fun() -> QOSP end}]),
+                 {ok, _} =
+                     connect([{host, "127.1"},
+                              {port, 5001},
+                              {name, c1},
+                              {suspend_handler, RegName}])
+         end,
+     _CleanUp =
+         fun(_) ->
+                 ok = stop_server(?MODULE),
+                 ok = stop_client(c1),
+                 %% to avoid port number reuse in other tests
+                 ok = timer:sleep(100)
+         end,
+     {inorder,
+      [{"Warming up",
+        ?_assertMatch(ok, timer:sleep(1000))},
+       {timeout, 20,
+        fun() ->
+                true = register(RegName, self()),
+                lists:foreach(
+                  fun(_) ->
+                          spawn_link(fun() -> cast(c1, <<>>) end)
+                  end, lists:seq(1, 5000)),
+                ok = timer:sleep(100),
+                %% server was flooded with requests, and sent back to the
+                %% clients 'suspend' flow control signal:
+                receive
+                    {tcpcall_suspend, _, QOSP} ->
+                        ok
+                after 1000 ->
+                        throw(no_suspend_signal)
+                end
         end}
       ]}}.
 

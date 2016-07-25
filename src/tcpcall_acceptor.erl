@@ -37,7 +37,9 @@
          socket :: port(),
          receiver :: tcpcall:receiver(),
          max_parallel_requests :: tcpcall:max_parallel_requests(),
-         overflow_suspend_period :: tcpcall:overflow_suspend_period()
+         overflow_suspend_period :: tcpcall:overflow_suspend_period(),
+         max_message_queue_len :: tcpcall:max_message_queue_len(),
+         queue_overflow_suspend_period :: tcpcall:queue_overflow_suspend_period()
         }).
 
 %% --------------------------------------------------------------------
@@ -117,12 +119,23 @@ init(Options) ->
         application:get_env(
           tcpcall, server_default_overflow_suspend_period, 5000),
     OSP = proplists:get_value(overflow_suspend_period, Options, DefaultOSP),
+    DefaultMMQL =
+        application:get_env(
+          tcpcall, server_default_max_message_queue_len, 3000),
+    MMQL = proplists:get_value(max_message_queue_len, Options, DefaultMMQL),
+    DefaultQOSP =
+        application:get_env(
+          tcpcall, server_default_queue_overflow_suspend_period, 1000),
+    QOSP = proplists:get_value(queue_overflow_suspend_period, Options, DefaultQOSP),
     InitialState =
         #state{
            bind_port = BindPort,
            receiver = Receiver,
            max_parallel_requests = MPR,
-           overflow_suspend_period = OSP},
+           overflow_suspend_period = OSP,
+           max_message_queue_len = MMQL,
+           queue_overflow_suspend_period = QOSP
+          },
     {ok, listen(InitialState)}.
 
 %% @hidden
@@ -143,7 +156,9 @@ handle_info(?SIG_ACCEPT, State) when State#state.socket /= undefined ->
                     {acceptor, self()},
                     {receiver, State#state.receiver},
                     {max_parallel_requests, State#state.max_parallel_requests},
-                    {overflow_suspend_period, State#state.overflow_suspend_period}
+                    {overflow_suspend_period, State#state.overflow_suspend_period},
+                    {max_message_queue_len, State#state.max_message_queue_len},
+                    {queue_overflow_suspend_period, State#state.queue_overflow_suspend_period}
                    ]);
         {error, timeout} ->
             ok

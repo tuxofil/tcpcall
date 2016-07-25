@@ -47,7 +47,9 @@
         {acceptor, pid()} |
         {receiver, tcpcall:receiver()} |
         {max_parallel_requests, tcpcall:max_parallel_requests()} |
-        {overflow_suspend_period, tcpcall:overflow_suspend_period()}.
+        {overflow_suspend_period, tcpcall:overflow_suspend_period()} |
+        {max_message_queue_len, tcpcall:max_message_queue_len()} |
+        {queue_overflow_suspend_period, tcpcall:queue_overflow_suspend_period()}.
 
 -record(
    state,
@@ -55,6 +57,8 @@
     options :: server_options(),
     max_parallel_requests :: tcpcall:max_parallel_requests(),
     overflow_suspend_period :: tcpcall:overflow_suspend_period(),
+    max_message_queue_len :: tcpcall:max_message_queue_len(),
+    queue_overflow_suspend_period :: tcpcall:queue_overflow_suspend_period(),
     ready = false :: boolean(),
     acceptor_pid :: pid(),
     acceptor_mon :: reference(),
@@ -190,6 +194,8 @@ init(Options) ->
     {receiver, Receiver} = lists:keyfind(receiver, 1, Options),
     MPR = proplists:get_value(max_parallel_requests, Options),
     OSP = proplists:get_value(overflow_suspend_period, Options),
+    MMQL = proplists:get_value(max_message_queue_len, Options),
+    QOSP = proplists:get_value(queue_overflow_suspend_period, Options),
     %% initialize gauge for spawned cast workers
     undefined = put(?async_workers, 0),
     {ok,
@@ -198,6 +204,8 @@ init(Options) ->
             options = Options,
             max_parallel_requests = MPR,
             overflow_suspend_period = OSP,
+            max_message_queue_len = MMQL,
+            queue_overflow_suspend_period = QOSP,
             acceptor_pid = AcceptorPid,
             acceptor_mon = MonitorRef,
             receiver = Receiver,
@@ -210,9 +218,14 @@ init(Options) ->
 handle_info({tcp, Socket, Data}, State)
   when Socket == State#state.socket, State#state.ready ->
     %% process data from the socket only when up and ready
-    case handle_data_from_net(State, Data) of
+    case check_message_queue_len(State) of
         ok ->
-            {noreply, State};
+            case handle_data_from_net(State, Data) of
+                ok ->
+                    {noreply, State};
+                stop ->
+                    {stop, normal, State}
+            end;
         stop ->
             {stop, normal, State}
     end;
@@ -539,3 +552,36 @@ workers_count(State) ->
     RegisteredSyncRequests = ets:info(State#state.registry, size),
     SpawnedAsyncRequests = get(?async_workers),
     RegisteredSyncRequests + SpawnedAsyncRequests.
+
+%% @doc Check the size of process message queue.
+-spec check_message_queue_len(#state{}) -> ok | stop.
+check_message_queue_len(State) ->
+    MMQL = State#state.max_message_queue_len,
+    MaxMessageQueueLen =
+        if is_integer(MMQL) ->
+                MMQL;
+           is_function(MMQL, 0) ->
+                MMQL()
+        end,
+    case process_info(self(), message_queue_len) of
+        {message_queue_len, Len} when Len < MaxMessageQueueLen ->
+            %% message queue length is of normal size
+            ok;
+        _Overload ->
+            %% ask clients for suspend
+            QOSP = State#state.queue_overflow_suspend_period,
+            Millis =
+                if is_integer(QOSP) ->
+                        QOSP;
+                   is_function(QOSP) ->
+                        QOSP()
+                end,
+            case gen_tcp:send(
+                   State#state.socket,
+                   ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
+                ok ->
+                    ok;
+                {error, _Reason} ->
+                    stop
+            end
+    end.
