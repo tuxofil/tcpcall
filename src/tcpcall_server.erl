@@ -545,8 +545,8 @@ workers_count(State) ->
 -spec check_message_queue_len(#state{}) -> ok | stop.
 check_message_queue_len(State) ->
     MaxMessageQueueLen = get_max_message_queue_len(State),
-    case process_info(self(), message_queue_len) of
-        {message_queue_len, Len} when Len < MaxMessageQueueLen ->
+    case get_message_queue_len() of
+        Len when Len < MaxMessageQueueLen ->
             %% message queue length is of normal size
             ok;
         _Overload ->
@@ -561,6 +561,12 @@ check_message_queue_len(State) ->
                     stop
             end
     end.
+
+%% @doc Return current message queue length.
+-spec get_message_queue_len() -> non_neg_integer().
+get_message_queue_len() ->
+    {message_queue_len, Len} = process_info(self(), message_queue_len),
+    Len.
 
 %% @doc Get value for max_parallel_requests option.
 -spec get_max_parallel_requests(#state{}) -> pos_integer().
