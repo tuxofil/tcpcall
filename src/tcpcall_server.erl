@@ -389,15 +389,8 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
 handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
     %% relay the cast to the receiver process
     ok = deliver_cast(State#state.receiver, Request),
-    OSP = State#state.overflow_suspend_period,
     is_overloaded(State) andalso
-        suspend(
-          self(),
-          if is_integer(OSP) ->
-                  OSP;
-             is_function(OSP, 0) ->
-                  OSP()
-          end),
+        suspend(self(), get_overflow_suspend_period(State)),
     ok;
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
@@ -538,12 +531,7 @@ vacuum(Registry) ->
 %% is less than count of actually running workers.
 -spec is_overloaded(#state{}) -> boolean().
 is_overloaded(State) ->
-    MPR = State#state.max_parallel_requests,
-    if is_integer(MPR) ->
-            MPR =< workers_count(State);
-       is_function(MPR, 0) ->
-            MPR() =< workers_count(State)
-    end.
+    get_max_parallel_requests(State) =< workers_count(State).
 
 %% @doc Return total count of running workers. This include
 %% workers for sync requests and workers for casts (async requests).
@@ -556,26 +544,14 @@ workers_count(State) ->
 %% @doc Check the size of process message queue.
 -spec check_message_queue_len(#state{}) -> ok | stop.
 check_message_queue_len(State) ->
-    MMQL = State#state.max_message_queue_len,
-    MaxMessageQueueLen =
-        if is_integer(MMQL) ->
-                MMQL;
-           is_function(MMQL, 0) ->
-                MMQL()
-        end,
+    MaxMessageQueueLen = get_max_message_queue_len(State),
     case process_info(self(), message_queue_len) of
         {message_queue_len, Len} when Len < MaxMessageQueueLen ->
             %% message queue length is of normal size
             ok;
         _Overload ->
             %% ask clients for suspend
-            QOSP = State#state.queue_overflow_suspend_period,
-            Millis =
-                if is_integer(QOSP) ->
-                        QOSP;
-                   is_function(QOSP) ->
-                        QOSP()
-                end,
+            Millis = get_queue_overflow_suspend_period(State),
             case gen_tcp:send(
                    State#state.socket,
                    ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
@@ -585,3 +561,39 @@ check_message_queue_len(State) ->
                     stop
             end
     end.
+
+%% @doc Get value for max_parallel_requests option.
+-spec get_max_parallel_requests(#state{}) -> pos_integer().
+get_max_parallel_requests(#state{max_parallel_requests = MPR})
+  when is_integer(MPR) ->
+    MPR;
+get_max_parallel_requests(#state{max_parallel_requests = MPR})
+  when is_function(MPR, 0) ->
+    MPR().
+
+%% @doc Get value for overflow_suspend_period option.
+-spec get_overflow_suspend_period(#state{}) -> pos_integer().
+get_overflow_suspend_period(#state{overflow_suspend_period = OSP})
+  when is_integer(OSP) ->
+    OSP;
+get_overflow_suspend_period(#state{overflow_suspend_period = OSP})
+  when is_function(OSP, 0) ->
+    OSP().
+
+%% @doc Get value for max_message_queue_len option.
+-spec get_max_message_queue_len(#state{}) -> pos_integer().
+get_max_message_queue_len(#state{max_message_queue_len = MMQL})
+  when is_integer(MMQL) ->
+    MMQL;
+get_max_message_queue_len(#state{max_message_queue_len = MMQL})
+  when is_function(MMQL, 0) ->
+    MMQL().
+
+%% @doc Get value for queue_overflow_suspend_period option.
+-spec get_queue_overflow_suspend_period(#state{}) -> pos_integer().
+get_queue_overflow_suspend_period(#state{queue_overflow_suspend_period = QOSP})
+  when is_integer(QOSP) ->
+    QOSP;
+get_queue_overflow_suspend_period(#state{queue_overflow_suspend_period = QOSP})
+  when is_function(QOSP, 0) ->
+    QOSP().
