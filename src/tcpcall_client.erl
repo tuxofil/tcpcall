@@ -551,7 +551,7 @@ do_suspend_hook(State, Millis) ->
         {suspend_handler, undefined} ->
             ok;
         {suspend_handler, PID} when is_atom(PID) orelse is_pid(PID) ->
-            _Sent = PID ! {tcpcall_suspend, self(), Millis},
+            catch PID ! {tcpcall_suspend, self(), Millis},
             ok;
         {suspend_handler, Fun} when is_function(Fun, 1) ->
             _Ignored = Fun(Millis),
