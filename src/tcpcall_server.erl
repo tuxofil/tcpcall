@@ -311,12 +311,10 @@ handle_cast(?SIG_READY, State) ->
           ?MODULE, vacuum, [State#state.registry]),
     {noreply, State#state{ready = true}};
 handle_cast(?SUSPEND(Millis), State) ->
-    case gen_tcp:send(
-           State#state.socket,
-           ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
+    case do_send_suspend(State, Millis) of
         ok ->
             {noreply, State};
-        {error, _Reason} ->
+        stop ->
             {stop, normal, State}
     end;
 handle_cast(?RESUME, State) ->
@@ -436,9 +434,12 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
 handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
     %% relay the cast to the receiver process
     ok = deliver_cast(State#state.receiver, Request),
-    is_overloaded(State) andalso
-        suspend(self(), get_overflow_suspend_period(State)),
-    ok;
+    case is_overloaded(State) of
+        true ->
+            do_send_suspend(State, get_overflow_suspend_period(State));
+        false ->
+            ok
+    end;
 handle_data_from_net(_State, _BadOrUnknownPacket) ->
     %% ignore
     ok.
@@ -597,8 +598,24 @@ check_message_queue_len(State) ->
             ok;
         _Overload ->
             increment_counter(?max_messages_reached),
-            %% ask clients for suspend
-            Millis = get_queue_overflow_suspend_period(State),
+            %% ask client for suspend
+            do_send_suspend(
+              State, get_queue_overflow_suspend_period(State))
+    end.
+
+%% @doc Send 'suspend' packet to the client side.
+%% There is optimization: do not send the signal each time
+%% because it is a waste of network traffic and time. Send it
+%% only when previously sent suspend period was elapsed.
+-spec do_send_suspend(#state{}, Millis :: pos_integer()) -> ok | stop.
+do_send_suspend(State, Millis) ->
+    Now = tcpcall_lib:millis(),
+    case get(suspend_expires) of
+        Deadline when is_integer(Deadline), Deadline =< Now ->
+            ok;
+        _ExpiredOrNotSet ->
+            Deadline = Now + Millis,
+            put(suspend_expires, Deadline),
             case gen_tcp:send(
                    State#state.socket,
                    ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
