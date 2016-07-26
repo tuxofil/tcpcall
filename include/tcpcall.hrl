@@ -9,6 +9,7 @@
 -define(_TCPCALL, true).
 
 -define(SIG_STOP, stop).
+-define(SIG_STATUS, status).
 
 %% Connection pool balancer types
 -define(round_robin, round_robin).

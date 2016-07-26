@@ -16,7 +16,8 @@
     suspend/2,
     resume/1,
     uplink_cast/2,
-    stop/1
+    stop/1,
+    status/1
    ]).
 
 %% gen_server callback exports
@@ -169,6 +170,11 @@ queue_error(BridgeRef, RequestRef, Reason) ->
 -spec stop(BridgeRef :: tcpcall:bridge_ref()) -> ok.
 stop(BridgeRef) ->
     ok = gen_server:call(BridgeRef, ?SIG_STOP).
+
+%% @doc Show detailed status of the process.
+-spec status(BridgeRef :: tcpcall:bridge_ref()) -> list().
+status(BridgeRef) ->
+    gen_server:call(BridgeRef, ?SIG_STATUS).
 
 %% --------------------------------------------------------------------
 %% gen_server callback functions
@@ -328,9 +334,39 @@ handle_cast(_Request, State) ->
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
                          {stop, Reason :: normal, Reply :: ok, #state{}} |
+                         {reply, any(), #state{}} |
                          {noreply, NewState :: #state{}}.
 handle_call(?SIG_STOP, _From, State) ->
     {stop, _Reason = normal, _Reply = ok, State};
+handle_call(?SIG_STATUS, _From, State) ->
+    {reply,
+     [{socket, State#state.socket},
+      {peer,
+       try
+           {ok, Peer} = inet:peername(State#state.socket),
+           Peer
+       catch _:_ ->
+               undefined
+       end},
+      {sync_requests, ets:info(State#state.registry, size)},
+      {async_requests, get(?async_workers)},
+      {message_queue_len, get_message_queue_len()},
+      {receiver, State#state.receiver},
+      {max_parallel_requests,
+       State#state.max_parallel_requests,
+       get_max_parallel_requests(State)},
+      {overflow_suspend_period,
+       State#state.overflow_suspend_period,
+       get_overflow_suspend_period(State)},
+      {max_message_queue_len,
+       State#state.max_message_queue_len,
+       get_max_message_queue_len(State)},
+      {queue_overflow_suspend_period,
+       State#state.queue_overflow_suspend_period,
+       get_queue_overflow_suspend_period(State)},
+      {options, State#state.options}
+     ],
+     State};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
 

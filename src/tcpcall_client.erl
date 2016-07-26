@@ -17,7 +17,8 @@
     wait_reply/2,
     wait_cast_ack/1,
     is_connected/1,
-    stop/1
+    stop/1,
+    status/1
    ]).
 
 %% gen_server callback exports
@@ -191,6 +192,11 @@ stop(BridgeRef) ->
     _Sent = BridgeRef ! ?SIG_STOP,
     ok.
 
+%% @doc Show detailed status of the process.
+-spec status(BridgeRef :: tcpcall:bridge_ref()) -> list().
+status(BridgeRef) ->
+    gen_server:call(BridgeRef, ?SIG_STATUS).
+
 %% --------------------------------------------------------------------
 %% gen_server callback functions
 %% --------------------------------------------------------------------
@@ -319,7 +325,28 @@ handle_cast(_Request, State) ->
 
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
+                         {reply, any(), NewState :: #state{}} |
                          {noreply, NewState :: #state{}}.
+handle_call(?SIG_STATUS, _From, State) ->
+    {reply,
+     [{socket, State#state.socket},
+      {peer,
+       try
+           {ok, Peer} = inet:peername(State#state.socket),
+           Peer
+       catch _:_ ->
+               undefined
+       end},
+      {sync_requests, ets:info(State#state.registry, size)},
+      {max_parallel_requests,
+       State#state.max_parallel_requests,
+       get_max_parallel_requests(State)},
+      {max_parallel_requests_policy,
+       State#state.max_parallel_requests_policy,
+       get_max_parallel_requests_policy(State)},
+      {options, State#state.options}
+     ],
+     State};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
 
