@@ -15,7 +15,8 @@
     clients/1,
     register_client/1,
     set_active/2,
-    stop/1
+    stop/1,
+    status/1
    ]).
 
 %% gen_server callback exports
@@ -94,6 +95,13 @@ set_active(BridgeRef, IsActive) when is_boolean(IsActive) ->
 stop(BridgeRef) ->
     _Sent = BridgeRef ! ?SIG_STOP,
     ok.
+
+%% @doc Return list of running server processes with their detailed
+%% statuses.
+%% This is not part of public API. Intended mostly for debugging.
+-spec status(Acceptor :: pid() | atom()) -> list().
+status(Acceptor) ->
+    [{C, (catch tcpcall_server:status(C))} || C <- clients(Acceptor)].
 
 %% --------------------------------------------------------------------
 %% gen_server callback functions

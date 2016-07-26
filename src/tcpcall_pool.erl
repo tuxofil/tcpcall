@@ -11,7 +11,15 @@
 -behaviour(gen_server).
 
 %% API exports
--export([start_link/2, call/3, cast/2, stop/1, workers/1, reconfig/2]).
+-export(
+   [start_link/2,
+    call/3,
+    cast/2,
+    stop/1,
+    workers/1,
+    reconfig/2,
+    status/1
+   ]).
 
 %% gen_server callback exports
 -export(
@@ -161,6 +169,24 @@ workers(PoolName) ->
                NewOptions :: tcpcall:client_pool_options()) -> ok.
 reconfig(PoolName, NewOptions) ->
     gen_server:cast(PoolName, ?SIG_RECONFIG(NewOptions)).
+
+%% @doc Return detailed status for connection pool.
+%% This is not part of public API. Intended mostly for debugging.
+-spec status(PoolName :: tcpcall:client_pool_name()) -> list().
+status(PoolName) ->
+    PoolStatus = gen_server:call(PoolName, ?SIG_STATUS),
+    WorkerStatuses =
+        lists:map(
+          fun({WorkerID, List}) ->
+                  PID = proplists:get_value(pid, List),
+                  {WorkerID,
+                   List ++
+                       try
+                           tcpcall_client:status(PID)
+                       catch _:_ -> [] end}
+          end, proplists:get_value(workers, PoolStatus)),
+    [{active_workers, workers(PoolName)} |
+     PoolStatus ++ WorkerStatuses].
 
 %% --------------------------------------------------------------------
 %% gen_server callback functions
@@ -326,7 +352,21 @@ handle_cast(_Request, State) ->
 
 %% @hidden
 -spec handle_call(Request :: any(), From :: any(), State :: #state{}) ->
+                         {reply, any(), #state{}} |
                          {noreply, NewState :: #state{}}.
+handle_call(?SIG_STATUS, _From, State) ->
+    {reply,
+     [{balancer, State#state.balancer},
+      {options, State#state.options},
+      {workers,
+       lists:map(
+         fun({PID, {IsConnected, IsSuspended, WorkerID}}) ->
+                 {WorkerID,
+                  [{connected, IsConnected},
+                   {suspended, IsSuspended},
+                   {pid, PID}]}
+         end, dict:to_list(State#state.workers))}],
+     State};
 handle_call(_Request, _From, State) ->
     {noreply, State}.
 
