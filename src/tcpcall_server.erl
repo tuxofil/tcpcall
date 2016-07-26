@@ -76,6 +76,10 @@
 %% gauge for spawned workers for cast requests
 -define(async_workers, async_workers).
 
+%% internal counters for overflow events
+-define(max_processes_reached, max_processes_reached).
+-define(max_messages_reached, max_messages_reached).
+
 %% ----------------------------------------------------------------------
 %% Erlang interface definitions
 
@@ -204,6 +208,9 @@ init(Options) ->
     QOSP = proplists:get_value(queue_overflow_suspend_period, Options),
     %% initialize gauge for spawned cast workers
     undefined = put(?async_workers, 0),
+    %% initialize internal counters
+    undefined = put(?max_processes_reached, 0),
+    undefined = put(?max_messages_reached, 0),
     {ok,
      #state{socket = Socket,
             ready = false, %% will wait for 'ready' signal
@@ -364,6 +371,9 @@ handle_call(?SIG_STATUS, _From, State) ->
       {queue_overflow_suspend_period,
        State#state.queue_overflow_suspend_period,
        get_queue_overflow_suspend_period(State)},
+      {counters,
+       [{?max_processes_reached, get(?max_processes_reached)},
+        {?max_messages_reached, get(?max_messages_reached)}]},
       {options, State#state.options}
      ],
      State};
@@ -410,6 +420,7 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
                     end
             end;
         overload ->
+            increment_counter(?max_processes_reached),
             %% immediately reply to the remote side with error
             Reply = term_to_binary(overload),
             case gen_tcp:send(
@@ -523,8 +534,7 @@ deliver_cast(FunObject, Request)
                   ok
           end),
     _MonRef = monitor(process, Pid),
-    _OldValue = put(?async_workers, get(?async_workers) + 1),
-    ok.
+    increment_counter(?async_workers).
 
 %% @doc Lookup SeqNum by RequestRef and remove it from the
 %% registry.
@@ -586,6 +596,7 @@ check_message_queue_len(State) ->
             %% message queue length is of normal size
             ok;
         _Overload ->
+            increment_counter(?max_messages_reached),
             %% ask clients for suspend
             Millis = get_queue_overflow_suspend_period(State),
             case gen_tcp:send(
@@ -597,6 +608,12 @@ check_message_queue_len(State) ->
                     stop
             end
     end.
+
+%% @doc Increment value for internal counter or gauge.
+-spec increment_counter(Counter :: atom()) -> ok.
+increment_counter(Counter) ->
+    _OldValue = put(Counter, get(Counter) + 1),
+    ok.
 
 %% @doc Return current message queue length.
 -spec get_message_queue_len() -> non_neg_integer().
