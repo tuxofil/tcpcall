@@ -46,7 +46,9 @@
 -type enum_peer() :: {pos_integer(), tcpcall:peer()}.
 
 -type workers_registry() ::
-        dict:dict(pid(), {IsConnected :: boolean(), enum_peer()}).
+        dict:dict(pid(), {IsConnected :: boolean(),
+                          IsSuspended :: boolean(),
+                          enum_peer()}).
 
 %% ETS table keys
 -define(WORKERS, workers).
