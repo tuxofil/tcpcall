@@ -379,21 +379,8 @@ connect(State) ->
         SeqNum :: seq_num()) -> ok | overload.
 register_request_from_local_process(State, RequestRef, From, SeqNum) ->
     Registry = State#state.registry,
-    MPR = State#state.max_parallel_requests,
-    MaxParallelRequests =
-        if is_integer(MPR) ->
-                MPR;
-           is_function(MPR, 0) ->
-                MPR()
-        end,
-    MPRP = State#state.max_parallel_requests_policy,
-    MaxParallelRequestsPolicy =
-        if is_atom(MPRP) ->
-                MPRP;
-           is_function(MPRP, 0) ->
-                MPRP()
-        end,
-    case MaxParallelRequestsPolicy of
+    MaxParallelRequests = get_max_parallel_requests(State),
+    case get_max_parallel_requests_policy(State) of
         ?deny_new ->
             %% If request registry is full, do not register new request
             %% and reply immediately with 'overload'
@@ -545,3 +532,21 @@ do_suspend_hook(State, Millis) ->
         false ->
             ok
     end.
+
+%% @doc Get value for max_parallel_requests option.
+-spec get_max_parallel_requests(#state{}) -> pos_integer().
+get_max_parallel_requests(#state{max_parallel_requests = MPR})
+  when is_integer(MPR) ->
+    MPR;
+get_max_parallel_requests(#state{max_parallel_requests = MPR})
+  when is_function(MPR, 0) ->
+    MPR().
+
+%% @doc Get value for max_parallel_requests_policy option.
+-spec get_max_parallel_requests_policy(#state{}) -> ?drop_old | ?deny_new.
+get_max_parallel_requests_policy(#state{max_parallel_requests_policy = MPRP})
+  when is_atom(MPRP) ->
+    MPRP;
+get_max_parallel_requests_policy(#state{max_parallel_requests_policy = MPRP})
+  when is_function(MPRP, 0) ->
+    MPRP().
