@@ -1,3 +1,18 @@
+erlang-tcpcall (1.4.1) unstable; urgency=low
+
+  * client: add periodic vacuuming for request registry
+  * server: optimize sending "suspend" signals
+  * server: add internal overflow counters
+  * client minor fix: handle error when suspend_handler is not alive
+  * pool&acceptor: add status/1 call
+  * pool: spec fix
+  * client&server: add status/1 call
+  * client: move configuration fetch to separate functions
+  * server: fetch message queue len in a separate function
+  * server: move configuration fetch to separate functions
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 27 Jul 2016 12:47:18 +0300
+
 erlang-tcpcall (1.4.0) unstable; urgency=low
 
   * prevent server message queue overflow
