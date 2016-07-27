@@ -200,9 +200,9 @@ connect_pool(PoolName, Options) ->
 call(BridgeRef, Request, Timeout)
   when is_binary(Request) ->
     RequestRef = make_ref(),
-    DeadLine = tcpcall_lib:micros() + Timeout * 1000,
+    Deadline = tcpcall_lib:micros() + Timeout * 1000,
     case tcpcall_client:queue_request(
-           BridgeRef, self(), RequestRef, DeadLine, Request) of
+           BridgeRef, self(), RequestRef, Deadline, Request) of
         ok ->
             tcpcall_client:wait_reply(RequestRef, Timeout);
         {error, _Reason} = Error ->

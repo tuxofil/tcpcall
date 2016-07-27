@@ -21,6 +21,9 @@
     status/1
    ]).
 
+%% Used by timer:apply_interval/4
+-export([reg_vacuum/1]).
+
 %% gen_server callback exports
 -export(
    [init/1, handle_call/3, handle_info/2, handle_cast/2,
@@ -44,6 +47,10 @@
     registry :: registry(),
     lord :: pid() | undefined
    }).
+
+-type deadline() :: Micros :: pos_integer().
+
+-define(VACUUM_PERIOD, 60 * 1000). %% one minute
 
 %% internal signals
 -define(SIG_CONNECT, connect).
@@ -99,7 +106,7 @@ start_link(Options) ->
 -spec queue_request(BridgeRef :: tcpcall:bridge_ref(),
                     From :: pid(),
                     RequestRef :: reference(),
-                    DeadLine :: pos_integer(),
+                    Deadline :: deadline(),
                     Request :: tcpcall:data()) ->
                            ok | {error, overload | notalive}.
 queue_request(BridgeRef, From, RequestRef, DeadLine, Request) ->
@@ -222,7 +229,7 @@ init(Options) ->
     %% a mapping from SeqNum (of arrived reply from the
     %% socket) to RequestRef of the request sent by a
     %% local Erlang process
-    Registry = ets:new(?MODULE, [ordered_set]),
+    Registry = reg_new(),
     %% schedule connect to the remote host immediately
     _Sent = self() ! ?SIG_CONNECT,
     {ok,
@@ -287,7 +294,7 @@ handle_info(_Request, State) ->
 %% @hidden
 -spec handle_cast(Request :: any(), State :: #state{}) ->
                          {noreply, NewState :: #state{}}.
-handle_cast(?QUEUE_REQUEST(From, RequestRef, DeadLine, Request), State)
+handle_cast(?QUEUE_REQUEST(From, RequestRef, Deadline, Request), State)
   when State#state.socket /= undefined ->
     %% Received a request from a local Erlang process
     SeqNum =
@@ -296,18 +303,19 @@ handle_cast(?QUEUE_REQUEST(From, RequestRef, DeadLine, Request), State)
            true ->
                 State#state.seq_num
         end,
-    case register_request_from_local_process(State, RequestRef, From, SeqNum) of
+    case register_request_from_local_process(
+           State, RequestRef, From, SeqNum, Deadline) of
         ok ->
             case gen_tcp:send(
                    State#state.socket,
-                   ?PACKET_REQUEST(SeqNum, DeadLine, Request)) of
+                   ?PACKET_REQUEST(SeqNum, Deadline, Request)) of
                 ok ->
                     {noreply, State#state{seq_num = SeqNum + 1}};
                 {error, Reason} ->
                     %% Failed to send. Reply to the local process
                     %% immediately and try to reconnect.
                     _Sent = From ! ?ARRIVE_ERROR(RequestRef, Reason),
-                    true = ets:delete(State#state.registry, SeqNum),
+                    reg_del(State#state.registry, SeqNum),
                     {noreply, connect(State)}
             end;
         overload ->
@@ -337,7 +345,7 @@ handle_call(?SIG_STATUS, _From, State) ->
        catch _:_ ->
                undefined
        end},
-      {sync_requests, ets:info(State#state.registry, size)},
+      {sync_requests, reg_size(State#state.registry)},
       {max_parallel_requests,
        State#state.max_parallel_requests,
        get_max_parallel_requests(State)},
@@ -378,7 +386,7 @@ connect(State) ->
     _OldConnectedFlag = erase(?CONNECTED_FLAG),
     %% the function is called only in 'client' mode, so
     %% clear the registry
-    ok = clear_client_registry(State#state.registry),
+    ok = reg_clear(State#state.registry),
     {host, Host} = lists:keyfind(host, 1, State#state.options),
     {port, Port} = lists:keyfind(port, 1, State#state.options),
     ConnTimeout =
@@ -403,73 +411,41 @@ connect(State) ->
         #state{},
         RequestRef :: reference(),
         From :: pid(),
-        SeqNum :: seq_num()) -> ok | overload.
-register_request_from_local_process(State, RequestRef, From, SeqNum) ->
+        seq_num(),
+        deadline()) -> ok | overload.
+register_request_from_local_process(State, RequestRef, From, SeqNum, Deadline) ->
     Registry = State#state.registry,
     MaxParallelRequests = get_max_parallel_requests(State),
     case get_max_parallel_requests_policy(State) of
         ?deny_new ->
             %% If request registry is full, do not register new request
             %% and reply immediately with 'overload'
-            case ets:info(Registry, size) of
+            case reg_size(Registry) of
                 RecordsCount when MaxParallelRequests =< RecordsCount ->
-                    overload;
+                    case reg_vacuum(State#state.registry) of
+                        0 ->
+                            overload;
+                        _PosInteger ->
+                            reg_add(Registry, SeqNum, From, RequestRef, Deadline)
+                    end;
                 _RecordsCount ->
-                    true = ets:insert(Registry, {SeqNum, From, RequestRef}),
-                    ok
+                    reg_add(Registry, SeqNum, From, RequestRef, Deadline)
             end;
         ?drop_old ->
             %% If request registry is full, drop the eldest record from it.
-            true = ets:insert(Registry, {SeqNum, From, RequestRef}),
-            case ets:info(Registry, size) of
+            reg_add(Registry, SeqNum, From, RequestRef, Deadline),
+            case reg_size(Registry) of
                 RecordsCount when MaxParallelRequests < RecordsCount ->
-                    OldSeqNum = ets:first(Registry),
-                    %% remove the eldest record from the registry,
-                    %% and send 'timeout' error to the caller process
-                    [{OldSeqNum, OldFrom, OldRequestRef}] =
-                        ets:lookup(Registry, OldSeqNum),
-                    _Sent = OldFrom ! ?ARRIVE_ERROR(OldRequestRef, timeout),
-                    true = ets:delete(Registry, OldSeqNum),
-                    ok;
+                    reg_del_eldest(Registry);
                 _RecordsCount ->
                     ok
             end
     end.
 
-%% @doc Lookup RequestRef by the SeqNum and remove the record.
--spec pop_request_ref(Registry :: registry(), SeqNum :: seq_num()) ->
-                             {ok,
-                              RequestRef :: reference(),
-                              From :: pid()} |
-                             undefined.
-pop_request_ref(Registry, SeqNum) ->
-    case ets:lookup(Registry, SeqNum) of
-        [{SeqNum, From, RequestRef}] ->
-            true = ets:delete(Registry, SeqNum),
-            {ok, RequestRef, From};
-        [] ->
-            undefined
-    end.
-
-%% @doc Clear the clients registry.
-%% All records will be deleted and all pending requests will
-%% be discarded, sending the answers like {error, disconnected}.
--spec clear_client_registry(Registry :: registry()) -> ok.
-clear_client_registry(Registry) ->
-    Reason = disconnected,
-    undefined =
-        ets:foldl(
-          fun({_SeqNum, From, RequestRef}, Accum) ->
-                  _Sent = From ! ?ARRIVE_ERROR(RequestRef, Reason),
-                  Accum
-          end, undefined, Registry),
-    true = ets:delete_all_objects(Registry),
-    ok.
-
 %% @doc Handle a data packet received from the network socket.
 -spec handle_data_from_net(State :: #state{}, Data :: binary()) -> ok.
 handle_data_from_net(State, ?PACKET_REPLY(SeqNum, Reply)) ->
-    case pop_request_ref(State#state.registry, SeqNum) of
+    case reg_fetch(State#state.registry, SeqNum) of
         {ok, RequestRef, From} ->
             _Sent = From ! ?ARRIVE_REPLY(RequestRef, Reply),
             ok;
@@ -478,7 +454,7 @@ handle_data_from_net(State, ?PACKET_REPLY(SeqNum, Reply)) ->
             ok
     end;
 handle_data_from_net(State, ?PACKET_ERROR(SeqNum, EncodedReason)) ->
-    case pop_request_ref(State#state.registry, SeqNum) of
+    case reg_fetch(State#state.registry, SeqNum) of
         {ok, RequestRef, From} ->
             _Sent = From ! ?ARRIVE_ERROR(RequestRef, EncodedReason),
             ok;
@@ -577,3 +553,122 @@ get_max_parallel_requests_policy(#state{max_parallel_requests_policy = MPRP})
 get_max_parallel_requests_policy(#state{max_parallel_requests_policy = MPRP})
   when is_function(MPRP, 0) ->
     MPRP().
+
+%% ----------------------------------------------------------------------
+%% Registry management functions
+
+-record(
+   rrec,
+   {seq_num :: seq_num(),
+    caller :: pid(),
+    req_id :: reference(),
+    deadline :: deadline()
+   }).
+
+%% @doc Create new registry table.
+-spec reg_new() -> registry().
+reg_new() ->
+    %% The table is public to allow vacuuming from the
+    %% another process.
+    Registry = ets:new(?MODULE, [ordered_set, public, {keypos, 2}]),
+    %% Schedule periodic vacuuming.
+    {ok, _TRef} =
+        timer:apply_interval(
+          ?VACUUM_PERIOD, ?MODULE, reg_vacuum, [Registry]),
+    Registry.
+
+%% @doc Add new entry to the registry.
+-spec reg_add(registry(),
+              seq_num(),
+              Caller :: pid(),
+              RequestRef :: reference(),
+              deadline()) -> ok.
+reg_add(Registry, SeqNum, Caller, RequestRef, Deadline) ->
+    true = ets:insert(Registry, #rrec{seq_num = SeqNum,
+                                      caller = Caller,
+                                      req_id = RequestRef,
+                                      deadline = Deadline}),
+    ok.
+
+%% @doc Remove entry from the registry.
+-spec reg_del(registry(), seq_num()) -> ok.
+reg_del(Registry, SeqNum) ->
+    true = ets:delete(Registry, SeqNum),
+    ok.
+
+%% @doc Remove the eldest record from the registry,
+%% and send 'timeout' error to the caller process
+-spec reg_del_eldest(registry()) -> ok.
+reg_del_eldest(Registry) ->
+    case ets:first(Registry) of
+        '$end_of_table' ->
+            ok;
+        SeqNum ->
+            case ets:lookup(Registry, SeqNum) of
+                [#rrec{caller = Caller, req_id = RequestRef}] ->
+                    _Sent = Caller ! ?ARRIVE_ERROR(RequestRef, timeout),
+                    true = ets:delete(Registry, SeqNum),
+                    ok;
+                [] ->
+                    ok
+            end
+    end.
+
+%% @doc Return total count of records in the registry.
+-spec reg_size(registry()) -> non_neg_integer().
+reg_size(Registry) ->
+    ets:info(Registry, size).
+
+%% @doc Lookup RequestRef by the SeqNum and remove the record.
+-spec reg_fetch(registry(), seq_num()) ->
+                       {ok,
+                        RequestRef :: reference(),
+                        Caller :: pid()} |
+                       undefined.
+reg_fetch(Registry, SeqNum) ->
+    case ets:lookup(Registry, SeqNum) of
+        [#rrec{caller = Caller, req_id = RequestRef}] ->
+            true = ets:delete(Registry, SeqNum),
+            {ok, RequestRef, Caller};
+        [] ->
+            undefined
+    end.
+
+%% @doc Clear the clients registry.
+%% All records will be deleted and all pending requests will
+%% be discarded, sending the answers like {error, disconnected}.
+-spec reg_clear(registry()) -> ok.
+reg_clear(Registry) ->
+    Reason = disconnected,
+    undefined =
+        ets:foldl(
+          fun(#rrec{caller = Caller, req_id = RequestRef}, Accum) ->
+                  _Sent = Caller ! ?ARRIVE_ERROR(RequestRef, Reason),
+                  Accum
+          end, undefined, Registry),
+    true = ets:delete_all_objects(Registry),
+    ok.
+
+%% @hidden
+%% @doc Remove all expired items from the registry.
+-spec reg_vacuum(registry()) -> Removed :: non_neg_integer().
+reg_vacuum(Registry) ->
+    Now = tcpcall_lib:micros(),
+    try
+        ets:foldl(
+          fun(#rrec{seq_num = SeqNum,
+                    caller = Caller,
+                    req_id = RequestRef,
+                    deadline = Deadline}, Accum)
+                when Deadline < Now ->
+                  true = ets:delete(Registry, SeqNum),
+                  %% notify the caller
+                  _Sent = Caller ! ?ARRIVE_ERROR(RequestRef, timeout),
+                  Accum + 1;
+             (_NotExpiredEntry, Accum) ->
+                  throw({break, Accum})
+          end, 0, Registry)
+    catch
+        throw:{break, Removed} ->
+            Removed
+    end.
