@@ -252,6 +252,25 @@ handle_info(?SIG_SELF_DESTRUCT, State) when not State#state.ready ->
     %% The 'self_destruct' signal arrived before the
     %% 'ready' signal. Something went wrong, cannot continue.
     {stop, normal, State};
+handle_info({tcp_passive, Socket} = Notification, State)
+  when Socket == State#state.socket ->
+    IsOverloaded =
+        get_max_message_queue_len(State) < get_message_queue_len() orelse
+        is_overloaded_by_processes(State),
+    if IsOverloaded ->
+            %% postpone data receiving.
+            {ok, _TRef} = timer:send_after(300, Notification),
+            {noreply, State};
+       true ->
+            %% continue to receive data
+            case inet:setopts(State#state.socket, [{active, 100}]) of
+                ok ->
+                    {noreply, State};
+                {error, _Reason} ->
+                    %% socket is not alive
+                    {stop, normal, State}
+            end
+    end;
 handle_info({tcp_closed, Socket}, State)
   when Socket == State#state.socket ->
     {stop, normal, State};
@@ -309,7 +328,7 @@ handle_cast(?SIG_READY, State) ->
     %% The signal is sent by the acceptor process when it
     %% transfers socket ownership to the handler process.
     %% From the moment we can use the socket.
-    ok = inet:setopts(State#state.socket, [{active, true}]),
+    ok = inet:setopts(State#state.socket, [{active, 100}]),
     %% Schedule periodic vacuuming.
     {ok, _TRef} =
         timer:apply_interval(
