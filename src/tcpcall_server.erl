@@ -436,6 +436,7 @@ handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
     ok = deliver_cast(State#state.receiver, Request),
     case is_overloaded(State) of
         true ->
+            increment_counter(?max_processes_reached),
             do_send_suspend(State, get_overflow_suspend_period(State));
         false ->
             ok
