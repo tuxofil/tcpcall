@@ -445,7 +445,7 @@ handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
     increment_counter(?cast_input),
     %% relay the cast to the receiver process
     ok = deliver_cast(State#state.receiver, Request),
-    case is_overloaded(State) of
+    case is_overloaded_by_processes(State) of
         true ->
             increment_counter(?max_processes_reached),
             do_send_suspend(State, get_overflow_suspend_period(State));
@@ -463,7 +463,7 @@ handle_data_from_net(_State, _BadOrUnknownPacket) ->
         RequestRef :: reference(),
         DeadLine :: pos_integer()) -> ok | overload.
 register_request_from_network(State, SeqNum, RequestRef, DeadLine) ->
-    case is_overloaded(State) of
+    case is_overloaded_by_processes(State) of
         true ->
             overload;
         false ->
@@ -588,8 +588,8 @@ vacuum(Registry) ->
 
 %% @doc Return 'true' when configured max count of worker processes
 %% is less than count of actually running workers.
--spec is_overloaded(#state{}) -> boolean().
-is_overloaded(State) ->
+-spec is_overloaded_by_processes(#state{}) -> boolean().
+is_overloaded_by_processes(State) ->
     get_max_parallel_requests(State) =< workers_count(State).
 
 %% @doc Return total count of running workers. This include
