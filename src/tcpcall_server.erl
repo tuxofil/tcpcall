@@ -76,9 +76,12 @@
 %% gauge for spawned workers for cast requests
 -define(async_workers, async_workers).
 
-%% internal counters for overflow events
+%% internal counters
+-define(request_input, request_input).
+-define(cast_input, cast_input).
 -define(max_processes_reached, max_processes_reached).
 -define(max_messages_reached, max_messages_reached).
+-define(suspend_sent, suspend_sent).
 
 %% ----------------------------------------------------------------------
 %% Erlang interface definitions
@@ -209,8 +212,11 @@ init(Options) ->
     %% initialize gauge for spawned cast workers
     undefined = put(?async_workers, 0),
     %% initialize internal counters
+    undefined = put(?request_input, 0),
+    undefined = put(?cast_input, 0),
     undefined = put(?max_processes_reached, 0),
     undefined = put(?max_messages_reached, 0),
+    undefined = put(?suspend_sent, 0),
     {ok,
      #state{socket = Socket,
             ready = false, %% will wait for 'ready' signal
@@ -370,8 +376,11 @@ handle_call(?SIG_STATUS, _From, State) ->
        State#state.queue_overflow_suspend_period,
        get_queue_overflow_suspend_period(State)},
       {counters,
-       [{?max_processes_reached, get(?max_processes_reached)},
-        {?max_messages_reached, get(?max_messages_reached)}]},
+       [{?request_input, get(?request_input)},
+        {?cast_input, get(?cast_input)},
+        {?max_processes_reached, get(?max_processes_reached)},
+        {?max_messages_reached, get(?max_messages_reached)},
+        {?suspend_sent, get(?suspend_sent)}]},
       {options, State#state.options}
      ],
      State};
@@ -397,6 +406,7 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_data_from_net(State :: #state{}, Data :: binary()) ->
                                   ok | stop.
 handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
+    increment_counter(?request_input),
     RequestRef = make_ref(),
     case register_request_from_network(State, SeqNum, RequestRef, DeadLine) of
         ok ->
@@ -432,6 +442,7 @@ handle_data_from_net(State, ?PACKET_REQUEST(SeqNum, DeadLine, Request)) ->
             end
     end;
 handle_data_from_net(State, ?PACKET_CAST(_SeqNum, Request)) ->
+    increment_counter(?cast_input),
     %% relay the cast to the receiver process
     ok = deliver_cast(State#state.receiver, Request),
     case is_overloaded(State) of
@@ -621,7 +632,7 @@ do_send_suspend(State, Millis) ->
                    State#state.socket,
                    ?PACKET_FLOW_CONTROL_SUSPEND(Millis)) of
                 ok ->
-                    ok;
+                    increment_counter(?suspend_sent);
                 {error, _Reason} ->
                     stop
             end
