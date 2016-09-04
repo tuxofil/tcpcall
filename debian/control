@@ -3,7 +3,7 @@ Section: devel
 Priority: extra
 Maintainer: Aleksey Morarash <aleksey.morarash@gmail.com>
 Build-Depends: debhelper, erlang-base, erlang-dev, erlang-tools, erlang-edoc,
- erlang-eunit
+ erlang-eunit, golang
 Standards-Version: 3.9.3
 Homepage: https://github.com/tuxofil/erlang-tcpcall
 Vcs-Browser: https://github.com/tuxofil/erlang-tcpcall
@@ -20,3 +20,8 @@ Architecture: all
 Description: TCP Request-Reply Bridge developer documentation.
  Contains generated HTML documentation for the TCP Request-Reply
  Bridge source code.
+
+Package: golang-tcpcall
+Architecture: all
+Description: TCP-based Request-Reply Bridge: Golang bindings
+ TCP-based Request-Reply Bridge: Golang bindings.
