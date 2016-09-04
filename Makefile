@@ -11,6 +11,7 @@ doc:
 test:
 	$(MAKE) -C erlang eunit
 	$(MAKE) -C golang $@
+	$(MAKE) -C test
 
 fmt:
 	find . -type f -name \*.go -exec gofmt -w '{}' ';'
@@ -18,4 +19,5 @@ fmt:
 clean:
 	$(MAKE) -C erlang $@
 	$(MAKE) -C golang $@
+	$(MAKE) -C test $@
 	rm -f debian/erlang-tcpcall.install
