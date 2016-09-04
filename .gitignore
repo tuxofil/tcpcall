@@ -1,6 +1,4 @@
-Emakefile
-.dialyzer_plt
-*.beam
-*.app
 *~
+debian/erlang-tcpcall.install
 erl_crash.dump
+*_flymake

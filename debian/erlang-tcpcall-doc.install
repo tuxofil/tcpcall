@@ -1,1 +1,1 @@
-doc/*.html doc/*.css doc/*.png /usr/share/doc/erlang-tcpcall-doc
+erlang/doc/*.html erlang/doc/*.css erlang/doc/*.png /usr/share/doc/erlang-tcpcall-doc

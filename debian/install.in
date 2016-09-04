@@ -1,1 +1,0 @@
-ebin/*.app ebin/*.beam /usr/lib/erlang/lib/tcpcall-{{VERSION}}/ebin
