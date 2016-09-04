@@ -1,4 +1,4 @@
-TESTS = go-erl
+TESTS = go-erl go-erl-parallel
 
 .PHONY: all clean $(TESTS)
 
