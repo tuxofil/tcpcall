@@ -1,4 +1,7 @@
-TESTS = go-erl go-erl-parallel
+TESTS = \
+    go-erl \
+    go-erl-parallel \
+    go-reconnect
 
 .PHONY: all clean $(TESTS)
 
