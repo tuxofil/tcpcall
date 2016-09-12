@@ -1,3 +1,14 @@
+tcpcall (1.5.0) unstable; urgency=low
+
+  * go client reconnect feature: cover with test
+  * add test for go-to-erlang parallel requesting
+  * add simple test for go-to-erlang requesting
+  * initial release for Golang lib
+  * move Erlang code to subdir
+  * deb specs: simplify staged installation
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Mon, 12 Sep 2016 14:15:51 +0300
+
 erlang-tcpcall (1.4.2) unstable; urgency=low
 
   * server: protect from overload with socket data
