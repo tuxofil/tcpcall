@@ -191,6 +191,26 @@ func (p *Pool) GetActiveWorkersCount() int {
 	return len(p.active)
 }
 
+// Return count of requests being processed by all workers.
+func (p *Pool) GetQueuedRequests() (count int) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for _, w := range p.clients {
+		count += w.GetQueuedRequests()
+	}
+	return count
+}
+
+// Return count of requests being processed by active workers.
+func (p *Pool) GetActiveQueuedRequests() (count int) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for _, w := range p.active {
+		count += w.GetQueuedRequests()
+	}
+	return count
+}
+
 // Get peers list from configuration.
 func (p *Pool) getPeers() []string {
 	if p.config.PeersFetcher != nil {

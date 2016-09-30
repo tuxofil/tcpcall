@@ -193,6 +193,14 @@ func (c *Client) queue(seqnum proto.SeqNum, data []byte, deadline time.Time) (ch
 	return backchan, nil
 }
 
+// GetQueuedRequests function return total count of requests being
+// processed right now.
+func (c *Client) GetQueuedRequests() int {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return len(c.registry)
+}
+
 // Connect (or reconnect) to the server.
 func (c *Client) connect() error {
 	c.lock.Lock()
