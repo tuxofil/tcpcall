@@ -137,6 +137,7 @@ func (c *Client) Req(data []byte, timeout time.Duration) (rep []byte, err error)
 		}
 		return nil, RemoteCrashedError{string(reply.Error)}
 	case <-time.After(deadline.Sub(time.Now())):
+		c.popRegistry(req.SeqNum)
 		return nil, TimeoutError{}
 	}
 }
@@ -175,7 +176,7 @@ func (c *Client) queue(seqnum proto.SeqNum, data []byte, deadline time.Time) (ch
 	if c.config.Concurrency <= len(c.registry) {
 		return nil, OverloadError{}
 	}
-	backchan := make(chan reply)
+	backchan := make(chan reply, 1)
 	c.registry[seqnum] = &registryEntry{deadline, backchan}
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(data)))
