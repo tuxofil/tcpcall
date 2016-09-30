@@ -1,3 +1,15 @@
+tcpcall (1.6.0) unstable; urgency=low
+
+  * golang: add fuse for max reply packet size
+  * golang: fix queued requests leak on timeout
+  * golang pool: add new API calls: GetQueuedRequests() & GetActiveQueuedRequests()
+  * golang pool: add new API calls: GetWorkersCount() & GetActiveWorkersCount()
+  * golang pool: use mutex in more idiomatic way
+  * golang pool: return last error after failover
+  * add example config for golang lib
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Fri, 30 Sep 2016 18:49:00 +0300
+
 tcpcall (1.5.0) unstable; urgency=low
 
   * go client reconnect feature: cover with test
