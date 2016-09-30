@@ -177,6 +177,20 @@ func (p *Pool) GetWorkerPeers() []string {
 	return res
 }
 
+// Return count of all workers.
+func (p *Pool) GetWorkersCount() int {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return len(p.clients)
+}
+
+// Return count of active workers.
+func (p *Pool) GetActiveWorkersCount() int {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	return len(p.active)
+}
+
 // Get peers list from configuration.
 func (p *Pool) getPeers() []string {
 	if p.config.PeersFetcher != nil {
