@@ -49,6 +49,8 @@ type PoolConf struct {
 	Concurrency int
 	// Sleep duration before reconnect after connection failure.
 	ReconnectPeriod time.Duration
+	// Max reply packet size, in bytes. 0 means no limit.
+	MaxReplySize int
 	// Enable debug logging or not.
 	Trace bool
 	// Enable clients debug logging or not.
@@ -308,6 +310,7 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg := NewClientConf()
 	cfg.Concurrency = p.config.Concurrency
 	cfg.ReconnectPeriod = p.config.ReconnectPeriod
+	cfg.MaxReplySize = p.config.MaxReplySize
 	cfg.StateListener = &p.state_events
 	cfg.SuspendListener = &p.suspend_events
 	cfg.ResumeListener = &p.resume_events

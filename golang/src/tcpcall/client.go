@@ -49,6 +49,8 @@ type ClientConf struct {
 	Concurrency int
 	// Sleep duration before reconnect after connection failure.
 	ReconnectPeriod time.Duration
+	// Max reply packet size, in bytes. 0 means no limit.
+	MaxReplySize int
 	// Channel to send state events (connected/disconnected).
 	StateListener *chan StateEvent
 	// Channel to send 'suspend' events.
@@ -321,6 +323,9 @@ func (c *Client) readPacket() (int, interface{}, error) {
 	}
 	plen := binary.BigEndian.Uint32(header)
 	c.log("packet len=%d", plen)
+	if c.config.MaxReplySize != 0 && c.config.MaxReplySize < int(plen) {
+		return -1, nil, fmt.Errorf("reply packet too long (%d bytes)", plen)
+	}
 	bytes := make([]byte, plen)
 	n, err = c.socket.Read(bytes)
 	if err != nil || uint32(n) != plen {
