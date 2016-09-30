@@ -26,7 +26,7 @@ type Pool struct {
 	clients          []*Client
 	active           []*Client
 	balancer_pointer int
-	lock             *sync.Mutex
+	lock             sync.Locker
 	stop_flag        bool
 	state_events     chan StateEvent
 	suspend_events   chan SuspendEvent
@@ -143,6 +143,7 @@ func canFailover(err error) bool {
 // Select next worker from the list of connected workers.
 func (p *Pool) getNextActive() (client *Client) {
 	p.lock.Lock()
+	defer p.lock.Unlock()
 	if len(p.active) <= p.balancer_pointer {
 		p.balancer_pointer = 0
 	}
@@ -150,30 +151,29 @@ func (p *Pool) getNextActive() (client *Client) {
 		client = p.active[p.balancer_pointer]
 	}
 	p.balancer_pointer++
-	p.lock.Unlock()
 	return client
 }
 
 // Destroy the pool.
 func (p *Pool) Close() {
 	p.lock.Lock()
+	defer p.lock.Unlock()
 	if p.clients == nil || len(p.clients) == 0 {
 		for _, c := range p.clients {
 			c.Close()
 		}
 	}
 	p.stop_flag = true
-	p.lock.Unlock()
 }
 
 // Return address list of all connections in the pool.
 func (p *Pool) GetWorkerPeers() []string {
 	p.lock.Lock()
+	defer p.lock.Unlock()
 	res := make([]string, len(p.clients))
 	for i := 0; i < len(p.clients); i++ {
 		res[i] = p.clients[i].peer
 	}
-	p.lock.Unlock()
 	return res
 }
 
@@ -261,11 +261,11 @@ func (p *Pool) applyPeers(peers []string) {
 // Remove client connection from the pool.
 func (p *Pool) remWorker(index int) {
 	p.lock.Lock()
+	defer p.lock.Unlock()
 	worker := p.clients[index]
 	p.log("removing worker for %s", worker.peer)
 	remFromArray(index, &p.clients)
 	p.unpublishWorker(worker)
-	p.lock.Unlock()
 	worker.Close()
 }
 
@@ -282,12 +282,12 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.Trace = p.config.ClientTrace
 	worker, err := Dial(peer, cfg)
 	p.lock.Lock()
+	defer p.lock.Unlock()
 	p.log("adding worker for %s", peer)
 	addToArray(index, &p.clients, worker)
 	if err == nil {
 		p.publishWorker(worker)
 	}
-	p.lock.Unlock()
 }
 
 // Add client connection to the list of active (connected) workers.
