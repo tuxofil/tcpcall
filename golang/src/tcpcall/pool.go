@@ -87,9 +87,10 @@ func NewPoolConf() PoolConf {
 func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) {
 	deadline := time.Now().Add(timeout)
 	retry_count := len(p.active)
+	err = NotConnectedError{}
 	for time.Now().Before(deadline) && 0 < retry_count {
 		if c := p.getNextActive(); c != nil {
-			rep, err := c.Req(bytes, timeout)
+			rep, err = c.Req(bytes, timeout)
 			if canFailover(err) {
 				// try next connected server
 				retry_count--
@@ -97,12 +98,12 @@ func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) 
 			}
 			return rep, err
 		}
-		return nil, NotConnectedError{}
+		return nil, err
 	}
 	if !time.Now().Before(deadline) {
 		return nil, TimeoutError{}
 	}
-	return nil, NotConnectedError{}
+	return nil, err
 }
 
 // Make asynchronous request to the server.
