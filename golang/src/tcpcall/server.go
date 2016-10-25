@@ -144,6 +144,24 @@ func (s *Server) acceptLoop() {
 	}
 }
 
+// Return count of active client connections opened.
+func (s *Server) GetConnections() int {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return len(s.connections)
+}
+
+// Return total count of running requests.
+func (s *Server) GetWorkers() int {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	workers := 0
+	for h, _ := range s.connections {
+		workers += h.workers
+	}
+	return workers
+}
+
 // Print message to the stdout if verbose mode is enabled.
 func (s *Server) log(format string, args ...interface{}) {
 	if s.config.Trace {
