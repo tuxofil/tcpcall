@@ -1,3 +1,9 @@
+tcpcall (1.6.1) unstable; urgency=low
+
+  * golang: add stats getters for server
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Tue, 25 Oct 2016 13:37:02 +0300
+
 tcpcall (1.6.0) unstable; urgency=low
 
   * golang: add fuse for max reply packet size
