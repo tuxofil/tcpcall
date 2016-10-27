@@ -37,6 +37,8 @@ type ServerConf struct {
 	MaxConnections int
 	// Maximum request processing concurrency per connection.
 	Concurrency int
+	// Max request packet size, in bytes. 0 means no limit.
+	MaxRequestSize int
 	// Request processing function.
 	// Each request will be processed in parallel with others.
 	RequestCallback *func([]byte) []byte
@@ -304,7 +306,11 @@ func (h *ServerConn) readNextPacket() (ptype int, packet interface{}, err error)
 		return -1, nil, err
 	}
 	// read packet
-	encoded_packet := make([]byte, binary.BigEndian.Uint32(header))
+	plen := int(binary.BigEndian.Uint32(header))
+	if 0 < h.server.config.MaxRequestSize && h.server.config.MaxRequestSize < plen {
+		return -1, nil, fmt.Errorf("request packet too long (%d bytes)", plen)
+	}
+	encoded_packet := make([]byte, plen)
 	n, err = h.conn.Read(encoded_packet)
 	if err != nil {
 		h.log("packet read: %v", err)
