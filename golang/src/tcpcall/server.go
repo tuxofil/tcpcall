@@ -14,6 +14,7 @@ package tcpcall
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -296,13 +297,8 @@ func (h *ServerConn) decrementWorkers() {
 func (h *ServerConn) readNextPacket() (ptype int, packet interface{}, err error) {
 	header := make([]byte, 4)
 	// read packet header
-	n, err := h.conn.Read(header)
-	if err != nil {
+	if _, err := io.ReadFull(h.conn, header); err != nil {
 		h.log("header read: %v", err)
-		return -1, nil, err
-	}
-	if n != len(header) {
-		h.log("header too small")
 		return -1, nil, err
 	}
 	// read packet
@@ -311,13 +307,8 @@ func (h *ServerConn) readNextPacket() (ptype int, packet interface{}, err error)
 		return -1, nil, fmt.Errorf("request packet too long (%d bytes)", plen)
 	}
 	encoded_packet := make([]byte, plen)
-	n, err = h.conn.Read(encoded_packet)
-	if err != nil {
+	if _, err := io.ReadFull(h.conn, encoded_packet); err != nil {
 		h.log("packet read: %v", err)
-		return -1, nil, err
-	}
-	if n != len(encoded_packet) {
-		h.log("packet too small")
 		return -1, nil, err
 	}
 	// decode packet

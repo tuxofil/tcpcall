@@ -14,6 +14,7 @@ package tcpcall
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -316,8 +317,7 @@ func (c *Client) startClientDaemon() {
 // Read and decode next packet from the server.
 func (c *Client) readPacket() (int, interface{}, error) {
 	header := make([]byte, 4)
-	n, err := c.socket.Read(header)
-	if err != nil || n != 4 {
+	if _, err := io.ReadFull(c.socket, header); err != nil {
 		// failed to read packet header
 		return -1, nil, err
 	}
@@ -327,8 +327,7 @@ func (c *Client) readPacket() (int, interface{}, error) {
 		return -1, nil, fmt.Errorf("reply packet too long (%d bytes)", plen)
 	}
 	bytes := make([]byte, plen)
-	n, err = c.socket.Read(bytes)
-	if err != nil || uint32(n) != plen {
+	if _, err := io.ReadFull(c.socket, bytes); err != nil {
 		// failed to read packet body
 		return -1, nil, err
 	}
