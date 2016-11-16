@@ -176,13 +176,13 @@ func (s *Server) log(format string, args ...interface{}) {
 // Handle TCP connection from client.
 func (h *ServerConn) handleTcpConnection() {
 	h.log("accepted")
-	defer h.log("connection closed")
 	defer func() {
 		h.server.lock.Lock()
 		delete(h.server.connections, h)
 		h.server.lock.Unlock()
+		h.conn.Close()
+		h.log("connection closed")
 	}()
-	defer h.conn.Close()
 	for !h.stop_flag {
 		if h.server.config.Concurrency < h.workers {
 			// max workers count reached
