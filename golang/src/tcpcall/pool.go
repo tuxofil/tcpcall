@@ -22,15 +22,15 @@ import (
 
 // Connection pool state.
 type Pool struct {
-	config           PoolConf
-	clients          []*Client
-	active           []*Client
-	balancer_pointer int
-	lock             sync.Locker
-	stop_flag        bool
-	state_events     chan StateEvent
-	suspend_events   chan SuspendEvent
-	resume_events    chan ResumeEvent
+	config          PoolConf
+	clients         []*Client
+	active          []*Client
+	balancerPointer int
+	lock            sync.Locker
+	stopFlag        bool
+	stateEvents     chan StateEvent
+	suspendEvents   chan SuspendEvent
+	resumeEvents    chan ResumeEvent
 }
 
 // Connection pool configuration.
@@ -60,13 +60,13 @@ type PoolConf struct {
 // Create new connection pool.
 func NewPool(conf PoolConf) *Pool {
 	p := Pool{
-		config:         conf,
-		clients:        make([]*Client, 0),
-		active:         make([]*Client, 0),
-		lock:           &sync.Mutex{},
-		state_events:   make(chan StateEvent, 10),
-		suspend_events: make(chan SuspendEvent, 10),
-		resume_events:  make(chan ResumeEvent, 10),
+		config:        conf,
+		clients:       make([]*Client, 0),
+		active:        make([]*Client, 0),
+		lock:          &sync.Mutex{},
+		stateEvents:   make(chan StateEvent, 10),
+		suspendEvents: make(chan SuspendEvent, 10),
+		resumeEvents:  make(chan ResumeEvent, 10),
 	}
 	go startEventListenerDaemon(&p)
 	go startConfiguratorDaemon(&p)
@@ -81,7 +81,7 @@ func NewPoolConf() PoolConf {
 		ReconfigPeriod:  time.Second * 5,
 		Concurrency:     1000,
 		ReconnectPeriod: time.Millisecond * 100,
-		Trace:           trace_pool,
+		Trace:           tracePool,
 	}
 }
 
@@ -146,13 +146,13 @@ func canFailover(err error) bool {
 func (p *Pool) getNextActive() (client *Client) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if len(p.active) <= p.balancer_pointer {
-		p.balancer_pointer = 0
+	if len(p.active) <= p.balancerPointer {
+		p.balancerPointer = 0
 	}
-	if p.balancer_pointer < len(p.active) {
-		client = p.active[p.balancer_pointer]
+	if p.balancerPointer < len(p.active) {
+		client = p.active[p.balancerPointer]
 	}
-	p.balancer_pointer++
+	p.balancerPointer++
 	return client
 }
 
@@ -165,7 +165,7 @@ func (p *Pool) Close() {
 			c.Close()
 		}
 	}
-	p.stop_flag = true
+	p.stopFlag = true
 }
 
 // Return address list of all connections in the pool.
@@ -226,23 +226,23 @@ func (p *Pool) getPeers() []string {
 func startEventListenerDaemon(p *Pool) {
 	p.log("daemon started")
 	defer p.log("daemon terminated")
-	for !p.stop_flag {
+	for !p.stopFlag {
 		select {
-		case state_event := <-p.state_events:
+		case state_event := <-p.stateEvents:
 			switch {
 			case state_event.Online:
 				p.publishWorker(state_event.Sender)
 			case !state_event.Online:
 				p.unpublishWorker(state_event.Sender)
 			}
-		case suspend := <-p.suspend_events:
+		case suspend := <-p.suspendEvents:
 			if p.unpublishWorker(suspend.Sender) {
 				go func() {
 					time.Sleep(suspend.Duration)
-					p.resume_events <- ResumeEvent{suspend.Sender}
+					p.resumeEvents <- ResumeEvent{suspend.Sender}
 				}()
 			}
-		case resume := <-p.resume_events:
+		case resume := <-p.resumeEvents:
 			p.publishWorker(resume.Sender)
 		case <-time.After(time.Millisecond * 200):
 		}
@@ -254,7 +254,7 @@ func startEventListenerDaemon(p *Pool) {
 func startConfiguratorDaemon(p *Pool) {
 	p.log("reconfigurator daemon started")
 	defer p.log("reconfigurator daemon terminated")
-	for !p.stop_flag {
+	for !p.stopFlag {
 		p.applyPeers(p.getPeers())
 		time.Sleep(p.config.ReconfigPeriod)
 	}
@@ -272,7 +272,7 @@ func (p *Pool) applyPeers(peers []string) {
 		return l
 	}
 	for i := 0; i < mlen(); {
-		if p.stop_flag {
+		if p.stopFlag {
 			return
 		}
 		if i < len(peers) && i < len(p.clients) {
@@ -311,9 +311,9 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.Concurrency = p.config.Concurrency
 	cfg.ReconnectPeriod = p.config.ReconnectPeriod
 	cfg.MaxReplySize = p.config.MaxReplySize
-	cfg.StateListener = &p.state_events
-	cfg.SuspendListener = &p.suspend_events
-	cfg.ResumeListener = &p.resume_events
+	cfg.StateListener = &p.stateEvents
+	cfg.SuspendListener = &p.suspendEvents
+	cfg.ResumeListener = &p.resumeEvents
 	cfg.UplinkCastListener = p.config.UplinkCastListener
 	cfg.SyncConnect = false
 	cfg.Trace = p.config.ClientTrace

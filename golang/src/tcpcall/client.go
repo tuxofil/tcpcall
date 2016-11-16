@@ -39,9 +39,9 @@ type Client struct {
 	peer   string
 	config ClientConf
 	registry
-	lock      *sync.Mutex
-	socket    net.Conn
-	stop_flag bool
+	lock     *sync.Mutex
+	socket   net.Conn
+	stopFlag bool
 }
 
 // Connection configuration.
@@ -118,7 +118,7 @@ func NewClientConf() ClientConf {
 		Concurrency:     1000,
 		ReconnectPeriod: time.Millisecond * 100,
 		SyncConnect:     true,
-		Trace:           trace_client,
+		Trace:           traceClient,
 	}
 }
 
@@ -232,7 +232,7 @@ func (c *Client) connectUnsafe() error {
 // Close connection to server.
 func (c *Client) Close() {
 	c.log("closing...")
-	c.stop_flag = true
+	c.stopFlag = true
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.closeUnsafe()
@@ -244,7 +244,7 @@ func (c *Client) closeUnsafe() {
 	s := c.socket
 	c.socket = nil
 	if s != nil {
-		if c.config.StateListener != nil && !c.stop_flag {
+		if c.config.StateListener != nil && !c.stopFlag {
 			select {
 			case (*c.config.StateListener) <- StateEvent{c, true}:
 			case <-time.After(time.Second / 5):
@@ -269,7 +269,7 @@ func (c *Client) closeUnsafe() {
 func (c *Client) startClientDaemon() {
 	c.log("daemon started")
 	defer c.log("daemon terminated")
-	for !c.stop_flag {
+	for !c.stopFlag {
 		if c.socket != nil {
 			ptype, data, err := c.readPacket()
 			if err != nil {

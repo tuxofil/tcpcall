@@ -29,7 +29,7 @@ type Server struct {
 	socket      net.Listener
 	connections map[*ServerConn]bool
 	lock        *sync.Mutex
-	stop_flag   bool
+	stopFlag    bool
 }
 
 // Server configuration
@@ -54,12 +54,12 @@ type ServerConf struct {
 
 // Connection handler state
 type ServerConn struct {
-	peer      string
-	conn      net.Conn
-	workers   int
-	lock      *sync.Mutex
-	server    *Server
-	stop_flag bool
+	peer     string
+	conn     net.Conn
+	workers  int
+	lock     *sync.Mutex
+	server   *Server
+	stopFlag bool
 }
 
 // Start new server.
@@ -86,13 +86,13 @@ func NewServerConf() ServerConf {
 		MaxConnections:  500,
 		Concurrency:     1000,
 		SuspendDuration: time.Second,
-		Trace:           trace_server,
+		Trace:           traceServer,
 	}
 }
 
 // Stop the server.
 func (s *Server) Stop() {
-	s.stop_flag = true
+	s.stopFlag = true
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for h, _ := range s.connections {
@@ -124,7 +124,7 @@ func (s *Server) acceptLoop() {
 	defer s.socket.Close()
 	s.log("daemon started")
 	defer s.log("daemon terminated")
-	for !s.stop_flag {
+	for !s.stopFlag {
 		if s.config.MaxConnections <= len(s.connections) {
 			time.Sleep(time.Millisecond * 200)
 			continue
@@ -184,7 +184,7 @@ func (h *ServerConn) handleTcpConnection() {
 		h.conn.Close()
 		h.log("connection closed")
 	}()
-	for !h.stop_flag {
+	for !h.stopFlag {
 		if h.server.config.Concurrency < h.workers {
 			// max workers count reached
 			err := h.suspend(h.server.config.SuspendDuration)
@@ -195,12 +195,12 @@ func (h *ServerConn) handleTcpConnection() {
 			time.Sleep(time.Millisecond * 100)
 			continue
 		}
-		packet_type, data, err := h.readNextPacket()
+		packetType, data, err := h.readNextPacket()
 		if err != nil {
 			return
 		}
-		h.log("got packet of type %d: %v", packet_type, data)
-		h.process(packet_type, data)
+		h.log("got packet of type %d: %v", packetType, data)
+		h.process(packetType, data)
 	}
 }
 
@@ -218,7 +218,7 @@ func (h *ServerConn) resume() error {
 
 // Force close connection to the client.
 func (h *ServerConn) close() {
-	h.stop_flag = true
+	h.stopFlag = true
 	h.log("stopped")
 }
 
@@ -242,8 +242,8 @@ func (h *ServerConn) writePacket(packet proto.Packet) error {
 	return nil
 }
 
-func (h *ServerConn) process(packet_type int, data interface{}) {
-	switch packet_type {
+func (h *ServerConn) process(packetType int, data interface{}) {
+	switch packetType {
 	case proto.REQUEST:
 		go h.processRequest(data.(*proto.PacketRequest))
 	case proto.CAST:
@@ -270,10 +270,10 @@ func (h *ServerConn) processRequest(req *proto.PacketRequest) {
 	} else {
 		res = []byte{}
 	}
-	reply_packet := proto.PacketReply{req.SeqNum, res}
-	err := h.writePacket(reply_packet)
+	replyPacket := proto.PacketReply{req.SeqNum, res}
+	err := h.writePacket(replyPacket)
 	if err == nil {
-		h.log("sent reply: %v", reply_packet)
+		h.log("sent reply: %v", replyPacket)
 	} else {
 		h.log("sent reply failed: %v", err)
 	}
@@ -306,13 +306,13 @@ func (h *ServerConn) readNextPacket() (ptype int, packet interface{}, err error)
 	if 0 < h.server.config.MaxRequestSize && h.server.config.MaxRequestSize < plen {
 		return -1, nil, fmt.Errorf("request packet too long (%d bytes)", plen)
 	}
-	encoded_packet := make([]byte, plen)
-	if _, err := io.ReadFull(h.conn, encoded_packet); err != nil {
+	encodedPacket := make([]byte, plen)
+	if _, err := io.ReadFull(h.conn, encodedPacket); err != nil {
 		h.log("packet read: %v", err)
 		return -1, nil, err
 	}
 	// decode packet
-	ptype, packet, err = proto.Decode(encoded_packet)
+	ptype, packet, err = proto.Decode(encodedPacket)
 	if err != nil {
 		h.log("packet decode failed: %v", err)
 		return -1, nil, err

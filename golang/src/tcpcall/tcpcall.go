@@ -12,15 +12,17 @@ import (
 	"os"
 )
 
-var trace_client bool
-var trace_pool bool
-var trace_server bool
+var (
+	traceClient bool
+	tracePool   bool
+	traceServer bool
+)
 
 func init() {
 	s := os.Getenv("TCPCALL_CLIENT_TRACE")
-	trace_client = 0 < len(s)
+	traceClient = 0 < len(s)
 	s = os.Getenv("TCPCALL_POOL_TRACE")
-	trace_pool = 0 < len(s)
+	tracePool = 0 < len(s)
 	s = os.Getenv("TCPCALL_SERVER_TRACE")
-	trace_server = 0 < len(s)
+	traceServer = 0 < len(s)
 }
