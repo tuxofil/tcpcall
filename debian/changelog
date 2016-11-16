@@ -1,3 +1,11 @@
+tcpcall (1.7.1) unstable; urgency=low
+
+  * style fix: use camelCase for variable names
+  * read network socket properly, avoiding "unexpected EOF" errors
+  * close connection after deregistering it
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 16 Nov 2016 17:19:33 +0200
+
 tcpcall (1.7.0) unstable; urgency=low
 
   * golang: add fuse for max request packet size
