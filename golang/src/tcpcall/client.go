@@ -246,7 +246,7 @@ func (c *Client) closeUnsafe() {
 	if s != nil {
 		if c.config.StateListener != nil && !c.stopFlag {
 			select {
-			case (*c.config.StateListener) <- StateEvent{c, true}:
+			case (*c.config.StateListener) <- StateEvent{c, false}:
 			case <-time.After(time.Second / 5):
 			}
 		}

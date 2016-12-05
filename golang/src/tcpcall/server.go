@@ -134,6 +134,10 @@ func (s *Server) acceptLoop() {
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
+		if s.stopFlag {
+			socket.Close()
+			return
+		}
 		handler := ServerConn{
 			peer:   socket.RemoteAddr().String(),
 			conn:   socket,
@@ -219,6 +223,7 @@ func (h *ServerConn) resume() error {
 // Force close connection to the client.
 func (h *ServerConn) close() {
 	h.stopFlag = true
+	h.conn.Close()
 	h.log("stopped")
 }
 

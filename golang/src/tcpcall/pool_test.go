@@ -98,3 +98,80 @@ func TestApplyPeers(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+func TestWorkersCount(t *testing.T) {
+	cfg := []string{}
+	poolConf := NewPoolConf()
+	poolConf.ReconfigPeriod = time.Millisecond
+	poolConf.ReconnectPeriod = time.Millisecond
+	fetcher := func() []string {
+		return cfg
+	}
+	poolConf.PeersFetcher = &fetcher
+	pool := NewPool(poolConf)
+
+	if pool.GetWorkersCount() != 0 {
+		t.Fatal()
+	}
+	if pool.GetActiveWorkersCount() != 0 {
+		t.Fatal()
+	}
+
+	cfg = []string{"127.1:5024", "127.1:5025"}
+	time.Sleep(poolConf.ReconfigPeriod * 2)
+
+	if pool.GetWorkersCount() != 2 {
+		t.Fatal()
+	}
+	if pool.GetActiveWorkersCount() != 0 {
+		t.Fatal()
+	}
+
+	s1Conf := NewServerConf()
+	s1, err := Listen(5024, s1Conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(poolConf.ReconnectPeriod * 2)
+
+	if pool.GetWorkersCount() != 2 {
+		t.Fatal()
+	}
+	if pool.GetActiveWorkersCount() != 1 {
+		t.Fatal()
+	}
+
+	s2Conf := NewServerConf()
+	s2, err := Listen(5025, s2Conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(poolConf.ReconnectPeriod * 2)
+
+	if pool.GetWorkersCount() != 2 {
+		t.Fatal()
+	}
+	if pool.GetActiveWorkersCount() != 2 {
+		t.Fatal()
+	}
+
+	s1.Stop()
+	time.Sleep(time.Millisecond * 300)
+
+	if pool.GetWorkersCount() != 2 {
+		t.Fatal()
+	}
+	if pool.GetActiveWorkersCount() != 1 {
+		t.Fatal()
+	}
+
+	s2.Stop()
+	time.Sleep(time.Millisecond * 300)
+
+	if pool.GetWorkersCount() != 2 {
+		t.Fatal()
+	}
+	if pool.GetActiveWorkersCount() != 0 {
+		t.Fatal()
+	}
+}

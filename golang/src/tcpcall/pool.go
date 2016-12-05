@@ -152,6 +152,7 @@ func (p *Pool) getNextActive() (client *Client) {
 	if p.balancerPointer < len(p.active) {
 		client = p.active[p.balancerPointer]
 	}
+
 	p.balancerPointer++
 	return client
 }
@@ -317,14 +318,11 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.UplinkCastListener = p.config.UplinkCastListener
 	cfg.SyncConnect = false
 	cfg.Trace = p.config.ClientTrace
-	worker, err := Dial(peer, cfg)
+	worker, _ := Dial(peer, cfg)
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.log("adding worker for %s", peer)
 	addToArray(index, &p.clients, worker)
-	if err == nil {
-		p.publishWorker(worker)
-	}
 }
 
 // Add client connection to the list of active (connected) workers.
