@@ -1,3 +1,9 @@
+tcpcall (1.7.2) unstable; urgency=low
+
+  * golang: fix Pool.GetActiveWorkersCount() method
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Mon, 05 Dec 2016 17:40:57 +0200
+
 tcpcall (1.7.1) unstable; urgency=low
 
   * style fix: use camelCase for variable names
