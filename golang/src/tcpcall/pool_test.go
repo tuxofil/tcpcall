@@ -117,7 +117,7 @@ func TestWorkersCount(t *testing.T) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5024", "127.1:5025"}
+	cfg = []string{"127.0.0.1:5024", "127.0.0.1:5025"}
 	time.Sleep(poolConf.ReconfigPeriod * 2)
 
 	if pool.GetWorkersCount() != 2 {
