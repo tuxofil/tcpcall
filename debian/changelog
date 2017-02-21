@@ -1,3 +1,9 @@
+tcpcall (1.7.3) unstable; urgency=low
+
+  * adapt to Golang 1.7.4
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Tue, 21 Feb 2017 15:25:40 +0200
+
 tcpcall (1.7.2) unstable; urgency=low
 
   * golang: fix Pool.GetActiveWorkersCount() method
