@@ -2,3 +2,4 @@
 debian/erlang-tcpcall.install
 erl_crash.dump
 *_flymake
+*.swp
