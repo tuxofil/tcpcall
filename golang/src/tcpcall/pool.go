@@ -152,7 +152,6 @@ func (p *Pool) getNextActive() (client *Client) {
 	if p.balancerPointer < len(p.active) {
 		client = p.active[p.balancerPointer]
 	}
-
 	p.balancerPointer++
 	return client
 }
