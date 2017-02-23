@@ -25,7 +25,7 @@ func TestClientReqRep(t *testing.T) {
 	defer c.Close()
 	// make some requests
 	MkReq(t, c, 1, time.Millisecond*50, time.Millisecond*100, nil)
-	MkReq(t, c, 2, time.Millisecond*50, time.Millisecond*20, TimeoutError{})
+	MkReq(t, c, 2, time.Millisecond*50, time.Millisecond*20, TimeoutError)
 	s.Stop()
 	MkReq(t, c, 3, time.Millisecond*50, time.Millisecond*100, ANY)
 	sleep(time.Second)
@@ -100,7 +100,7 @@ func TestPoolReqRepSimple(t *testing.T) {
 	defer p.Close()
 	// make some requests
 	MkReq(t, p, 1, time.Millisecond*20, time.Millisecond*60, nil)
-	MkReq(t, p, 2, time.Millisecond*20, time.Millisecond*20, TimeoutError{})
+	MkReq(t, p, 2, time.Millisecond*20, time.Millisecond*20, TimeoutError)
 }
 
 func TestPoolReqRep(t *testing.T) {
@@ -113,7 +113,7 @@ func TestPoolReqRep(t *testing.T) {
 		MkReq(t, p, i, time.Millisecond*20, time.Millisecond*60, nil)
 	}
 	for i := 0; i < 10; i++ {
-		MkReq(t, p, i, time.Millisecond*20, time.Millisecond*20, TimeoutError{})
+		MkReq(t, p, i, time.Millisecond*20, time.Millisecond*20, TimeoutError)
 	}
 }
 
@@ -196,9 +196,9 @@ func TestPoolSuspend(t *testing.T) {
 	MkReq(t, p, 2, time.Millisecond, time.Millisecond*10, nil)
 	s.Suspend(time.Second)
 	time.Sleep(time.Millisecond * 400)
-	MkReq(t, p, 3, time.Millisecond, time.Millisecond*10, NotConnectedError{})
+	MkReq(t, p, 3, time.Millisecond, time.Millisecond*10, NotConnectedError)
 	time.Sleep(time.Millisecond * 400)
-	MkReq(t, p, 4, time.Millisecond, time.Millisecond*10, NotConnectedError{})
+	MkReq(t, p, 4, time.Millisecond, time.Millisecond*10, NotConnectedError)
 	time.Sleep(time.Millisecond * 400)
 	MkReq(t, p, 5, time.Millisecond, time.Millisecond*10, nil)
 }

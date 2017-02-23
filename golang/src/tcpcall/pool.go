@@ -89,7 +89,7 @@ func NewPoolConf() PoolConf {
 func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) {
 	deadline := time.Now().Add(timeout)
 	retry_count := len(p.active)
-	err = NotConnectedError{}
+	err = NotConnectedError
 	for time.Now().Before(deadline) && 0 < retry_count {
 		if c := p.getNextActive(); c != nil {
 			rep, err = c.Req(bytes, timeout)
@@ -103,7 +103,7 @@ func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) 
 		return nil, err
 	}
 	if !time.Now().Before(deadline) {
-		return nil, TimeoutError{}
+		return nil, TimeoutError
 	}
 	return nil, err
 }
@@ -112,7 +112,7 @@ func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) 
 func (p *Pool) Cast(data []byte) error {
 	active_count := len(p.active)
 	if active_count == 0 {
-		return NotConnectedError{}
+		return NotConnectedError
 	}
 	var err error
 	for i := 0; i < active_count; i++ {
@@ -130,7 +130,7 @@ func (p *Pool) Cast(data []byte) error {
 
 // Return true if request can be retransmitted to another server.
 func canFailover(err error) bool {
-	switch err.(type) {
+	switch err {
 	case NotConnectedError:
 		return true
 	case DisconnectedError:

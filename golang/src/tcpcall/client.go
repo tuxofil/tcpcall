@@ -138,10 +138,10 @@ func (c *Client) Req(data []byte, timeout time.Duration) (rep []byte, err error)
 		if reply.Error == nil {
 			return reply.Reply, nil
 		}
-		return nil, RemoteCrashedError{string(reply.Error)}
+		return nil, RemoteCrashedError
 	case <-time.After(deadline.Sub(time.Now())):
 		c.popRegistry(req.SeqNum)
-		return nil, TimeoutError{}
+		return nil, TimeoutError
 	}
 }
 
@@ -153,17 +153,17 @@ func (c *Client) Cast(data []byte) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if c.socket == nil {
-		return NotConnectedError{}
+		return NotConnectedError
 	}
 	_, err := c.socket.Write(header)
 	if err != nil {
 		c.closeUnsafe()
-		return DisconnectedError{}
+		return DisconnectedError
 	}
 	_, err = c.socket.Write(encoded)
 	if err != nil {
 		c.closeUnsafe()
-		return DisconnectedError{}
+		return DisconnectedError
 	}
 	c.log("cast sent")
 	return nil
@@ -174,10 +174,10 @@ func (c *Client) queue(seqnum proto.SeqNum, data []byte, deadline time.Time) (ch
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if c.socket == nil {
-		return nil, NotConnectedError{}
+		return nil, NotConnectedError
 	}
 	if c.config.Concurrency <= len(c.registry) {
-		return nil, OverloadError{}
+		return nil, OverloadError
 	}
 	backchan := make(chan reply, 1)
 	c.registry[seqnum] = &registryEntry{deadline, backchan}
@@ -186,12 +186,12 @@ func (c *Client) queue(seqnum proto.SeqNum, data []byte, deadline time.Time) (ch
 	_, err := c.socket.Write(header)
 	if err != nil {
 		c.closeUnsafe()
-		return nil, DisconnectedError{}
+		return nil, DisconnectedError
 	}
 	_, err = c.socket.Write(data)
 	if err != nil {
 		c.closeUnsafe()
-		return nil, DisconnectedError{}
+		return nil, DisconnectedError
 	}
 	c.log("req sent")
 	return backchan, nil
