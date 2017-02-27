@@ -12,9 +12,7 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
-	"encoding/binary"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -22,26 +20,33 @@ import (
 	"time"
 )
 
-type registry map[proto.SeqNum]*registryEntry
+type RRegistry map[proto.SeqNum]*RREntry
 
-type registryEntry struct {
+type RREntry struct {
 	Deadline time.Time
-	Chan     chan reply
+	Chan     chan RRReply
 }
 
-type reply struct {
+type RRReply struct {
 	Reply []byte
 	Error []byte
 }
 
 // Connection state.
 type Client struct {
-	peer   string
+	// address of the remote server to connect to
+	peer string
+	// client configuration
 	config ClientConf
-	registry
-	lock     *sync.Mutex
-	socket   net.Conn
-	stopFlag bool
+	// list of issued pending requests
+	registry   RRegistry
+	registryMu sync.Locker
+	// message oriented network socket
+	socket *MsgConn
+	// channel for disconnection events
+	closeChan chan bool
+	// set to truth on client termination
+	closed bool
 }
 
 // Connection configuration.
@@ -100,15 +105,16 @@ type UplinkCastEvent struct {
 // Connect to server side.
 func Dial(dst string, conf ClientConf) (c *Client, err error) {
 	c = &Client{
-		peer:     dst,
-		config:   conf,
-		registry: make(registry, conf.Concurrency),
-		lock:     &sync.Mutex{},
+		peer:       dst,
+		config:     conf,
+		registry:   make(RRegistry, conf.Concurrency),
+		registryMu: &sync.Mutex{},
+		closeChan:  make(chan bool, 50),
 	}
 	if conf.SyncConnect {
 		err = c.connect()
 	}
-	go c.startClientDaemon()
+	go c.connectLoop()
 	return c, err
 }
 
@@ -123,23 +129,37 @@ func NewClientConf() ClientConf {
 }
 
 // Make synchronous request to the server.
-func (c *Client) Req(data []byte, timeout time.Duration) (rep []byte, err error) {
-	deadline := time.Now().Add(timeout)
-	req := proto.NewRequest(data, deadline)
-	encoded := req.Encode()
-	//
-	backchan, err := c.queue(req.SeqNum, encoded, deadline)
-	if err != nil {
-		return nil, err
+func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err error) {
+	// queue
+	c.registryMu.Lock()
+	if c.config.Concurrency <= len(c.registry) {
+		return nil, OverloadError
 	}
+	entry := &RREntry{
+		Deadline: time.Now().Add(timeout),
+		Chan:     make(chan RRReply, 1),
+	}
+	req := proto.NewRequest(payload, entry.Deadline)
+	encoded := req.Encode()
+	c.registry[req.SeqNum] = entry
+	c.registryMu.Unlock()
+	// send through the network
+	if err := c.socket.Send(encoded); err != nil {
+		c.popRegistry(req.SeqNum)
+		if err == MsgConnNotConnectedError {
+			return nil, NotConnectedError
+		}
+		return nil, DisconnectedError
+	}
+	c.log("req sent")
 	// wait for the response
 	select {
-	case reply := <-backchan:
+	case reply := <-entry.Chan:
 		if reply.Error == nil {
 			return reply.Reply, nil
 		}
 		return nil, RemoteCrashedError
-	case <-time.After(deadline.Sub(time.Now())):
+	case <-time.After(entry.Deadline.Sub(time.Now())):
 		c.popRegistry(req.SeqNum)
 		return nil, TimeoutError
 	}
@@ -148,202 +168,143 @@ func (c *Client) Req(data []byte, timeout time.Duration) (rep []byte, err error)
 // Make asynchronous request to the server.
 func (c *Client) Cast(data []byte) error {
 	encoded := proto.NewCast(data).Encode()
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(encoded)))
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	if c.socket == nil {
-		return NotConnectedError
-	}
-	_, err := c.socket.Write(header)
-	if err != nil {
-		c.closeUnsafe()
-		return DisconnectedError
-	}
-	_, err = c.socket.Write(encoded)
-	if err != nil {
-		c.closeUnsafe()
-		return DisconnectedError
+	if err := c.socket.Send(encoded); err != nil {
+		return err
 	}
 	c.log("cast sent")
 	return nil
 }
 
-// Enqueue new request to the server.
-func (c *Client) queue(seqnum proto.SeqNum, data []byte, deadline time.Time) (chan reply, error) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	if c.socket == nil {
-		return nil, NotConnectedError
-	}
-	if c.config.Concurrency <= len(c.registry) {
-		return nil, OverloadError
-	}
-	backchan := make(chan reply, 1)
-	c.registry[seqnum] = &registryEntry{deadline, backchan}
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(data)))
-	_, err := c.socket.Write(header)
-	if err != nil {
-		c.closeUnsafe()
-		return nil, DisconnectedError
-	}
-	_, err = c.socket.Write(data)
-	if err != nil {
-		c.closeUnsafe()
-		return nil, DisconnectedError
-	}
-	c.log("req sent")
-	return backchan, nil
-}
-
 // GetQueuedRequests function return total count of requests being
 // processed right now.
 func (c *Client) GetQueuedRequests() int {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.registryMu.Lock()
+	defer c.registryMu.Unlock()
 	return len(c.registry)
 }
 
 // Connect (or reconnect) to the server.
 func (c *Client) connect() error {
-	c.lock.Lock()
-	err := c.connectUnsafe()
-	c.lock.Unlock()
-	return err
-}
-
-// Connect (or reconnect) to the server.
-func (c *Client) connectUnsafe() error {
-	c.closeUnsafe()
+	c.disconnect()
 	conn, err := net.Dial("tcp", c.peer)
 	if err == nil {
 		c.log("connected")
-		c.socket = conn
-		if c.config.StateListener != nil {
-			(*c.config.StateListener) <- StateEvent{c, true}
+		msgConn, err := NewMsgConn(conn, c.handlePacket, c.notifyClose)
+		if err != nil {
+			return err
 		}
+		msgConn.MaxPacketLen = c.config.MaxReplySize
+		c.socket = msgConn
+		c.notifyPool(true)
 	} else {
 		c.log("failed to connect: %s", err)
 	}
 	return err
 }
 
-// Close connection to server.
+// Terminate the client.
 func (c *Client) Close() {
 	c.log("closing...")
-	c.stopFlag = true
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	c.closeUnsafe()
+	c.closed = true
+	c.disconnect()
 	c.log("closed")
 }
 
 // Close connection to server.
-func (c *Client) closeUnsafe() {
-	s := c.socket
-	c.socket = nil
-	if s != nil {
-		if c.config.StateListener != nil && !c.stopFlag {
-			select {
-			case (*c.config.StateListener) <- StateEvent{c, false}:
-			case <-time.After(time.Second / 5):
-			}
-		}
-		s.Close()
-		// discard all pending requests
-		for _, v := range c.registry {
-			select {
-			case v.Chan <- reply{nil, []byte("disconnected")}:
-			default:
-			}
-		}
-		c.registry = make(registry, c.config.Concurrency)
-		c.log("disconnected")
+func (c *Client) disconnect() {
+	if c.socket == nil || c.socket.Closed() {
+		return
 	}
+	c.socket.Close()
+	c.notifyClose()
+	// discard all pending requests
+	c.registryMu.Lock()
+	for _, entry := range c.registry {
+		select {
+		case entry.Chan <- RRReply{nil, []byte("disconnected")}:
+		default:
+		}
+	}
+	c.registry = make(RRegistry, c.config.Concurrency)
+	c.registryMu.Unlock()
+	c.log("disconnected")
 }
 
 // Goroutine.
-// Receives data from network and dispatch them to callers.
 // Reconnects on network errors.
-func (c *Client) startClientDaemon() {
+func (c *Client) connectLoop() {
 	c.log("daemon started")
 	defer c.log("daemon terminated")
-	for !c.stopFlag {
-		if c.socket != nil {
-			ptype, data, err := c.readPacket()
-			if err != nil {
-				c.lock.Lock()
-				c.closeUnsafe()
-				c.lock.Unlock()
-				continue
-			}
-			switch ptype {
-			case proto.REPLY:
-				p := data.(*proto.PacketReply)
-				regEntry := c.popRegistry(p.SeqNum)
-				if regEntry != nil {
-					regEntry.Chan <- reply{p.Reply, nil}
-				}
-			case proto.ERROR:
-				p := data.(*proto.PacketError)
-				regEntry := c.popRegistry(p.SeqNum)
-				if regEntry != nil {
-					regEntry.Chan <- reply{nil, p.Reason}
-				}
-			case proto.FLOW_CONTROL_SUSPEND:
-				if c.config.SuspendListener != nil {
-					p := data.(*proto.PacketFlowControlSuspend)
-					(*c.config.SuspendListener) <- SuspendEvent{c, p.Duration}
-				}
-			case proto.FLOW_CONTROL_RESUME:
-				if c.config.ResumeListener != nil {
-					(*c.config.ResumeListener) <- ResumeEvent{c}
-				}
-			case proto.UPLINK_CAST:
-				if c.config.UplinkCastListener != nil {
-					p := data.(*proto.PacketUplinkCast)
-					(*c.config.UplinkCastListener) <- UplinkCastEvent{c, p.Data}
-				}
-			}
-		} else {
+	for !c.closed {
+		if c.socket == nil || c.socket.Closed() {
 			if err := c.connect(); err != nil {
 				time.Sleep(c.config.ReconnectPeriod)
+				continue
 			}
+		}
+		<-c.closeChan
+	}
+}
+
+// Send 'connection closed' notification to the client daemon.
+func (c *Client) notifyClose() {
+	c.notifyPool(false)
+	c.closeChan <- true
+}
+
+// Send connection state change notification to Client owner
+func (c *Client) notifyPool(connected bool) {
+	if c.config.StateListener != nil && !c.closed {
+		select {
+		case (*c.config.StateListener) <- StateEvent{c, connected}:
+		case <-time.After(time.Second / 5):
 		}
 	}
 }
 
-// Read and decode next packet from the server.
-func (c *Client) readPacket() (int, interface{}, error) {
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(c.socket, header); err != nil {
-		// failed to read packet header
-		return -1, nil, err
-	}
-	plen := binary.BigEndian.Uint32(header)
-	c.log("packet len=%d", plen)
-	if c.config.MaxReplySize != 0 && c.config.MaxReplySize < int(plen) {
-		return -1, nil, fmt.Errorf("reply packet too long (%d bytes)", plen)
-	}
-	bytes := make([]byte, plen)
-	if _, err := io.ReadFull(c.socket, bytes); err != nil {
-		// failed to read packet body
-		return -1, nil, err
-	}
-	ptype, data, err := proto.Decode(bytes)
-	c.log("decoded packet_type=%d; data=%v; err=%v", ptype, data, err)
+// Callback for message-oriented socket.
+// Handle message received from the remote peer.
+func (c *Client) handlePacket(packet []byte) {
+	ptype, payload, err := proto.Decode(packet)
+	c.log("decoded packet_type=%d; data=%v; err=%s", ptype, payload, err)
 	if err != nil {
-		c.log("decode failed: %v", err)
-		return -1, nil, err
+		// close connection on bad packet receive
+		c.log("decode failed: %s", err)
+		c.disconnect()
+		return
 	}
-	return ptype, data, nil
+	switch ptype {
+	case proto.REPLY:
+		p := payload.(*proto.PacketReply)
+		if entry := c.popRegistry(p.SeqNum); entry != nil {
+			entry.Chan <- RRReply{p.Reply, nil}
+		}
+	case proto.ERROR:
+		p := payload.(*proto.PacketError)
+		if entry := c.popRegistry(p.SeqNum); entry != nil {
+			entry.Chan <- RRReply{nil, p.Reason}
+		}
+	case proto.FLOW_CONTROL_SUSPEND:
+		if c.config.SuspendListener != nil {
+			p := payload.(*proto.PacketFlowControlSuspend)
+			(*c.config.SuspendListener) <- SuspendEvent{c, p.Duration}
+		}
+	case proto.FLOW_CONTROL_RESUME:
+		if c.config.ResumeListener != nil {
+			(*c.config.ResumeListener) <- ResumeEvent{c}
+		}
+	case proto.UPLINK_CAST:
+		if c.config.UplinkCastListener != nil {
+			p := payload.(*proto.PacketUplinkCast)
+			(*c.config.UplinkCastListener) <- UplinkCastEvent{c, p.Data}
+		}
+	}
 }
 
 // Lookup request in the registry and remove it.
-func (c *Client) popRegistry(seqnum proto.SeqNum) *registryEntry {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+func (c *Client) popRegistry(seqnum proto.SeqNum) *RREntry {
+	c.registryMu.Lock()
+	defer c.registryMu.Unlock()
 	res := c.registry[seqnum]
 	if res != nil {
 		delete(c.registry, seqnum)

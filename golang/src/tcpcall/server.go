@@ -12,9 +12,7 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
-	"encoding/binary"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -54,12 +52,11 @@ type ServerConf struct {
 
 // Connection handler state
 type ServerConn struct {
-	peer     string
-	conn     net.Conn
-	workers  int
-	lock     *sync.Mutex
-	server   *Server
-	stopFlag bool
+	peer    string
+	conn    *MsgConn
+	workers int
+	lock    *sync.Mutex
+	server  *Server
 }
 
 // Start new server.
@@ -96,7 +93,7 @@ func (s *Server) Stop() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for h, _ := range s.connections {
-		h.close()
+		go h.close()
 	}
 }
 
@@ -138,16 +135,21 @@ func (s *Server) acceptLoop() {
 			socket.Close()
 			return
 		}
-		handler := ServerConn{
+		h := &ServerConn{
 			peer:   socket.RemoteAddr().String(),
-			conn:   socket,
 			server: s,
 			lock:   &sync.Mutex{},
 		}
+		msgConn, err := NewMsgConn(socket, h.onRecv, h.onClose)
+		if err != nil {
+			socket.Close()
+			continue
+		}
+		h.conn = msgConn
+		h.log("accepted")
 		s.lock.Lock()
-		s.connections[&handler] = true
+		s.connections[h] = true
 		s.lock.Unlock()
-		go handler.handleTcpConnection()
 	}
 }
 
@@ -177,35 +179,48 @@ func (s *Server) log(format string, args ...interface{}) {
 	}
 }
 
-// Goroutine.
-// Handle TCP connection from client.
-func (h *ServerConn) handleTcpConnection() {
-	h.log("accepted")
-	defer func() {
-		h.server.lock.Lock()
-		delete(h.server.connections, h)
-		h.server.lock.Unlock()
-		h.conn.Close()
-		h.log("connection closed")
-	}()
-	for !h.stopFlag {
-		if h.server.config.Concurrency < h.workers {
-			// max workers count reached
-			err := h.suspend(h.server.config.SuspendDuration)
-			if err != nil {
-				h.log("suspend send: %v", err)
-				return
-			}
-			time.Sleep(time.Millisecond * 100)
-			continue
+// Callback for message-oriented socket.
+// Handles connection close event.
+func (h *ServerConn) onClose() {
+	h.server.lock.Lock()
+	delete(h.server.connections, h)
+	h.server.lock.Unlock()
+	h.log("connection closed")
+}
+
+// Callback for message-oriented socket.
+// Handles incoming message from the remote side.
+func (h *ServerConn) onRecv(packet []byte) {
+	if h.server.config.Concurrency < h.workers {
+		// max workers count reached
+		if err := h.suspend(h.server.config.SuspendDuration); err != nil {
+			h.log("suspend send: %v", err)
+			h.close()
 		}
-		packetType, data, err := h.readNextPacket()
+		return
+	}
+	h.incrementWorkers()
+	go func() {
+		defer h.decrementWorkers()
+		// decode packet
+		ptype, data, err := proto.Decode(packet)
 		if err != nil {
+			h.log("packet decode failed: %v", err)
+			h.close()
 			return
 		}
-		h.log("got packet of type %d: %v", packetType, data)
-		h.process(packetType, data)
-	}
+		h.log("got packet of type %d: %v", ptype, data)
+		switch ptype {
+		case proto.REQUEST:
+			h.processRequest(data.(*proto.PacketRequest))
+		case proto.CAST:
+			if h.server.config.CastCallback != nil {
+				(*h.server.config.CastCallback)((data.(*proto.PacketCast)).Request)
+			}
+		default:
+			// ignore packet
+		}
+	}()
 }
 
 // Send 'suspend' signal to the connected client.
@@ -222,52 +237,21 @@ func (h *ServerConn) resume() error {
 
 // Force close connection to the client.
 func (h *ServerConn) close() {
-	h.stopFlag = true
 	h.conn.Close()
 	h.log("stopped")
 }
 
 // Send packet back to the client side.
 func (h *ServerConn) writePacket(packet proto.Packet) error {
-	bytes := packet.Encode()
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(bytes)))
-	h.lock.Lock()
-	defer h.lock.Unlock()
-	_, err := h.conn.Write(header)
-	if err != nil {
-		h.log("header write: %v", err)
-		return err
-	}
-	_, err = h.conn.Write(bytes)
-	if err != nil {
+	if err := h.conn.Send(packet.Encode()); err != nil {
 		h.log("packet write: %v", err)
 		return err
 	}
 	return nil
 }
 
-func (h *ServerConn) process(packetType int, data interface{}) {
-	switch packetType {
-	case proto.REQUEST:
-		go h.processRequest(data.(*proto.PacketRequest))
-	case proto.CAST:
-		go func() {
-			h.incrementWorkers()
-			defer h.decrementWorkers()
-			if h.server.config.CastCallback != nil {
-				(*h.server.config.CastCallback)((data.(*proto.PacketCast)).Request)
-			}
-		}()
-	default:
-		// ignore packet
-	}
-}
-
 // Process synchronous request from the client.
 func (h *ServerConn) processRequest(req *proto.PacketRequest) {
-	h.incrementWorkers()
-	defer h.decrementWorkers()
 	var res []byte
 	if h.server.config.RequestCallback != nil {
 		f := *h.server.config.RequestCallback
@@ -296,33 +280,6 @@ func (h *ServerConn) decrementWorkers() {
 	h.lock.Lock()
 	h.workers--
 	h.lock.Unlock()
-}
-
-// Read and decode next packet from the network.
-func (h *ServerConn) readNextPacket() (ptype int, packet interface{}, err error) {
-	header := make([]byte, 4)
-	// read packet header
-	if _, err := io.ReadFull(h.conn, header); err != nil {
-		h.log("header read: %v", err)
-		return -1, nil, err
-	}
-	// read packet
-	plen := int(binary.BigEndian.Uint32(header))
-	if 0 < h.server.config.MaxRequestSize && h.server.config.MaxRequestSize < plen {
-		return -1, nil, fmt.Errorf("request packet too long (%d bytes)", plen)
-	}
-	encodedPacket := make([]byte, plen)
-	if _, err := io.ReadFull(h.conn, encodedPacket); err != nil {
-		h.log("packet read: %v", err)
-		return -1, nil, err
-	}
-	// decode packet
-	ptype, packet, err = proto.Decode(encodedPacket)
-	if err != nil {
-		h.log("packet decode failed: %v", err)
-		return -1, nil, err
-	}
-	return ptype, packet, err
 }
 
 // Print message to the stdout if verbose mode is enabled.
