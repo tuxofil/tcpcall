@@ -42,35 +42,35 @@ func TestApplyPeers(t *testing.T) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5010"}
+	cfg = []string{"127.0.0.1:5010"}
 	log.Printf("set peers to %v", cfg)
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !equals(cfg, pool.GetWorkerPeers()) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5000", "127.1:5010"}
+	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5010"}
 	log.Printf("set peers to %v", cfg)
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !equals(cfg, pool.GetWorkerPeers()) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5000", "127.1:5010", "127.1:5020"}
+	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020"}
 	log.Printf("set peers to %v", cfg)
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !equals(cfg, pool.GetWorkerPeers()) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5000", "127.1:5020"}
+	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5020"}
 	log.Printf("set peers to %v", cfg)
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !equals(cfg, pool.GetWorkerPeers()) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5020"}
+	cfg = []string{"127.0.0.1:5020"}
 	log.Printf("set peers to %v", cfg)
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !equals(cfg, pool.GetWorkerPeers()) {
@@ -84,7 +84,7 @@ func TestApplyPeers(t *testing.T) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.1:5000", "127.1:5010", "127.1:5020"}
+	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020"}
 	log.Printf("set peers to %v", cfg)
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !equals(cfg, pool.GetWorkerPeers()) {
