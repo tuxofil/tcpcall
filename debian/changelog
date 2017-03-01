@@ -1,3 +1,13 @@
+tcpcall (1.7.4) unstable; urgency=low
+
+  * adapt to Golang 1.7, stage 2
+  * move socket messaging functionality to conn.go
+  * remove extra new line
+  * golang: refactor errors
+  * gitignore *.swp files
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 01 Mar 2017 16:01:10 +0200
+
 tcpcall (1.7.3) unstable; urgency=low
 
   * adapt to Golang 1.7.4
