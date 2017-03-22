@@ -64,21 +64,28 @@ func (c *MsgConn) SetWriteDeadline(t time.Time) error {
 }
 
 // Send message to the other side.
-func (c *MsgConn) Send(msg []byte) error {
+func (c *MsgConn) Send(msg [][]byte) error {
 	if c == nil {
 		return MsgConnNotConnectedError
+	}
+	msgLen := 0
+	for _, e := range msg {
+		msgLen += len(e)
 	}
 	c.socketMu.Lock()
 	defer c.socketMu.Unlock()
 	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(msg)))
+	binary.BigEndian.PutUint32(header, uint32(msgLen))
 	if _, err := c.socket.Write(header); err != nil {
 		c.Close()
 		return err
 	}
-	if _, err := c.socket.Write(msg); err != nil {
-		c.Close()
-		return err
+	// write chunks one by one
+	for _, e := range msg {
+		if _, err := c.socket.Write(e); err != nil {
+			c.Close()
+			return err
+		}
 	}
 	return nil
 }

@@ -87,12 +87,17 @@ func NewPoolConf() PoolConf {
 
 // Make request.
 func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) {
+	return p.ReqChunks([][]byte{bytes}, timeout)
+}
+
+// Make request.
+func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err error) {
 	deadline := time.Now().Add(timeout)
 	retry_count := len(p.active)
 	err = NotConnectedError
 	for time.Now().Before(deadline) && 0 < retry_count {
 		if c := p.getNextActive(); c != nil {
-			rep, err = c.Req(bytes, timeout)
+			rep, err = c.ReqChunks(bytes, timeout)
 			if canFailover(err) {
 				// try next connected server
 				retry_count--
@@ -110,6 +115,11 @@ func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) 
 
 // Make asynchronous request to the server.
 func (p *Pool) Cast(data []byte) error {
+	return p.CastChunks([][]byte{data})
+}
+
+// Make asynchronous request to the server.
+func (p *Pool) CastChunks(data [][]byte) error {
 	active_count := len(p.active)
 	if active_count == 0 {
 		return NotConnectedError
@@ -117,7 +127,7 @@ func (p *Pool) Cast(data []byte) error {
 	var err error
 	for i := 0; i < active_count; i++ {
 		if c := p.getNextActive(); c != nil {
-			err = c.Cast(data)
+			err = c.CastChunks(data)
 			if canFailover(err) {
 				// try next connected server
 				continue

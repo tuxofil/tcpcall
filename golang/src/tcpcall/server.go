@@ -215,7 +215,8 @@ func (h *ServerConn) onRecv(packet []byte) {
 			h.processRequest(data.(*proto.PacketRequest))
 		case proto.CAST:
 			if h.server.config.CastCallback != nil {
-				(*h.server.config.CastCallback)((data.(*proto.PacketCast)).Request)
+				(*h.server.config.CastCallback)(
+					flatten((data.(*proto.PacketCast)).Request))
 			}
 		default:
 			// ignore packet
@@ -255,11 +256,11 @@ func (h *ServerConn) processRequest(req *proto.PacketRequest) {
 	var res []byte
 	if h.server.config.RequestCallback != nil {
 		f := *h.server.config.RequestCallback
-		res = f(req.Request)
+		res = f(flatten(req.Request))
 	} else {
 		res = []byte{}
 	}
-	replyPacket := proto.PacketReply{req.SeqNum, res}
+	replyPacket := proto.PacketReply{req.SeqNum, [][]byte{res}}
 	err := h.writePacket(replyPacket)
 	if err == nil {
 		h.log("sent reply: %v", replyPacket)

@@ -28,8 +28,8 @@ type RREntry struct {
 }
 
 type RRReply struct {
-	Reply []byte
-	Error []byte
+	Reply [][]byte
+	Error [][]byte
 }
 
 // Connection state.
@@ -130,6 +130,11 @@ func NewClientConf() ClientConf {
 
 // Make synchronous request to the server.
 func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err error) {
+	return c.ReqChunks([][]byte{payload}, timeout)
+}
+
+// Make synchronous request to the server.
+func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte, err error) {
 	// queue
 	c.registryMu.Lock()
 	if c.config.Concurrency <= len(c.registry) {
@@ -156,7 +161,7 @@ func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err err
 	select {
 	case reply := <-entry.Chan:
 		if reply.Error == nil {
-			return reply.Reply, nil
+			return flatten(reply.Reply), nil
 		}
 		return nil, RemoteCrashedError
 	case <-time.After(entry.Deadline.Sub(time.Now())):
@@ -167,6 +172,11 @@ func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err err
 
 // Make asynchronous request to the server.
 func (c *Client) Cast(data []byte) error {
+	return c.CastChunks([][]byte{data})
+}
+
+// Make asynchronous request to the server.
+func (c *Client) CastChunks(data [][]byte) error {
 	encoded := proto.NewCast(data).Encode()
 	if err := c.socket.Send(encoded); err != nil {
 		return err
@@ -221,7 +231,7 @@ func (c *Client) disconnect() {
 	c.registryMu.Lock()
 	for _, entry := range c.registry {
 		select {
-		case entry.Chan <- RRReply{nil, []byte("disconnected")}:
+		case entry.Chan <- RRReply{nil, [][]byte{[]byte("disconnected")}}:
 		default:
 		}
 	}
@@ -296,7 +306,7 @@ func (c *Client) handlePacket(packet []byte) {
 	case proto.UPLINK_CAST:
 		if c.config.UplinkCastListener != nil {
 			p := payload.(*proto.PacketUplinkCast)
-			(*c.config.UplinkCastListener) <- UplinkCastEvent{c, p.Data}
+			(*c.config.UplinkCastListener) <- UplinkCastEvent{c, flatten(p.Data)}
 		}
 	}
 }
@@ -318,4 +328,25 @@ func (c *Client) log(format string, args ...interface{}) {
 		prefix := fmt.Sprintf("tcpcall conn %s> ", c.peer)
 		log.Printf(prefix+format, args...)
 	}
+}
+
+// Convert array of []byte to plain []byte
+func flatten(data [][]byte) []byte {
+	switch len(data) {
+	case 0:
+		return []byte{}
+	case 1:
+		return data[0]
+	}
+	totalLen := 0
+	for _, e := range data {
+		totalLen += len(e)
+	}
+	res := make([]byte, totalLen)
+	offset := 0
+	for _, e := range data {
+		copy(res[offset:], e)
+		offset += len(e)
+	}
+	return res
 }
