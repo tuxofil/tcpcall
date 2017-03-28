@@ -1,3 +1,9 @@
+tcpcall (1.9.0) unstable; urgency=low
+
+  * optimisation: add buffering before sending data to the network
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Tue, 28 Mar 2017 18:58:25 +0300
+
 tcpcall (1.8.0) unstable; urgency=low
 
   * golang: add *Chunks([][]byte) API calls
