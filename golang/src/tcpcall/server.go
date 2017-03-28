@@ -38,6 +38,10 @@ type ServerConf struct {
 	Concurrency int
 	// Max request packet size, in bytes. 0 means no limit.
 	MaxRequestSize int
+	// Minimum flush period for socket writer
+	MinFlushPeriod time.Duration
+	// Socket write buffer size
+	WriteBufferSize int
 	// Request processing function.
 	// Each request will be processed in parallel with others.
 	RequestCallback *func([]byte) []byte
@@ -83,6 +87,8 @@ func NewServerConf() ServerConf {
 		MaxConnections:  500,
 		Concurrency:     1000,
 		SuspendDuration: time.Second,
+		MinFlushPeriod:  defMinFlush,
+		WriteBufferSize: defWBufSize,
 		Trace:           traceServer,
 	}
 }
@@ -140,7 +146,10 @@ func (s *Server) acceptLoop() {
 			server: s,
 			lock:   &sync.Mutex{},
 		}
-		msgConn, err := NewMsgConn(socket, h.onRecv, h.onClose)
+		msgConn, err := NewMsgConn(socket,
+			s.config.MinFlushPeriod,
+			s.config.WriteBufferSize,
+			h.onRecv, h.onClose)
 		if err != nil {
 			socket.Close()
 			continue

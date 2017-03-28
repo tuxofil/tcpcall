@@ -13,6 +13,7 @@ message.
 package tcpcall
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -29,11 +30,15 @@ var (
 
 // Message oriented connection
 type MsgConn struct {
-	socket net.Conn
+	socket    net.Conn
+	buffer    *bufio.Writer
+	lastFlush time.Time
 	// socket write mutex
 	socketMu sync.Locker
 	// maximum allowed length for incoming packets
 	MaxPacketLen int
+	// Minimum time between write buffer flushes
+	minFlushPeriod time.Duration
 	// incoming package handler
 	handler func([]byte)
 	// callback for disconnect event
@@ -42,15 +47,19 @@ type MsgConn struct {
 }
 
 // Create new message oriented connection.
-func NewMsgConn(socket net.Conn, handler func([]byte), onClose func()) (*MsgConn, error) {
+func NewMsgConn(socket net.Conn, minFlushPeriod time.Duration,
+	writeBufferSize int,
+	handler func([]byte), onClose func()) (*MsgConn, error) {
 	if err := socket.SetReadDeadline(time.Time{}); err != nil {
 		return nil, err
 	}
 	conn := &MsgConn{
-		socket:       socket,
-		socketMu:     &sync.Mutex{},
-		handler:      handler,
-		onDisconnect: onClose,
+		socket:         socket,
+		buffer:         bufio.NewWriterSize(socket, writeBufferSize),
+		socketMu:       &sync.Mutex{},
+		handler:        handler,
+		onDisconnect:   onClose,
+		minFlushPeriod: minFlushPeriod,
 	}
 	go conn.readLoop()
 	return conn, nil
@@ -76,16 +85,25 @@ func (c *MsgConn) Send(msg [][]byte) error {
 	defer c.socketMu.Unlock()
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(msgLen))
-	if _, err := c.socket.Write(header); err != nil {
+	if _, err := c.buffer.Write(header); err != nil {
 		c.Close()
 		return err
 	}
 	// write chunks one by one
 	for _, e := range msg {
-		if _, err := c.socket.Write(e); err != nil {
+		if _, err := c.buffer.Write(e); err != nil {
 			c.Close()
 			return err
 		}
+	}
+	// flush the buffer
+	if c.minFlushPeriod <= 0 ||
+		time.Now().After(c.lastFlush.Add(c.minFlushPeriod)) {
+		if err := c.buffer.Flush(); err != nil {
+			c.Close()
+			return err
+		}
+		c.lastFlush = time.Now()
 	}
 	return nil
 }

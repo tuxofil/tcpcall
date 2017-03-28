@@ -51,6 +51,10 @@ type PoolConf struct {
 	ReconnectPeriod time.Duration
 	// Max reply packet size, in bytes. 0 means no limit.
 	MaxReplySize int
+	// Minimum flush period for socket writer
+	MinFlushPeriod time.Duration
+	// Socket write buffer size
+	WriteBufferSize int
 	// Enable debug logging or not.
 	Trace bool
 	// Enable clients debug logging or not.
@@ -81,6 +85,8 @@ func NewPoolConf() PoolConf {
 		ReconfigPeriod:  time.Second * 5,
 		Concurrency:     1000,
 		ReconnectPeriod: time.Millisecond * 100,
+		MinFlushPeriod:  defMinFlush,
+		WriteBufferSize: defWBufSize,
 		Trace:           tracePool,
 	}
 }
@@ -321,6 +327,8 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.Concurrency = p.config.Concurrency
 	cfg.ReconnectPeriod = p.config.ReconnectPeriod
 	cfg.MaxReplySize = p.config.MaxReplySize
+	cfg.MinFlushPeriod = p.config.MinFlushPeriod
+	cfg.WriteBufferSize = p.config.WriteBufferSize
 	cfg.StateListener = &p.stateEvents
 	cfg.SuspendListener = &p.suspendEvents
 	cfg.ResumeListener = &p.resumeEvents

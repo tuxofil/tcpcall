@@ -57,6 +57,10 @@ type ClientConf struct {
 	ReconnectPeriod time.Duration
 	// Max reply packet size, in bytes. 0 means no limit.
 	MaxReplySize int
+	// Minimum flush period for socket writer
+	MinFlushPeriod time.Duration
+	// Socket write buffer size
+	WriteBufferSize int
 	// Channel to send state events (connected/disconnected).
 	StateListener *chan StateEvent
 	// Channel to send 'suspend' events.
@@ -123,6 +127,8 @@ func NewClientConf() ClientConf {
 	return ClientConf{
 		Concurrency:     1000,
 		ReconnectPeriod: time.Millisecond * 100,
+		MinFlushPeriod:  defMinFlush,
+		WriteBufferSize: defWBufSize,
 		SyncConnect:     true,
 		Trace:           traceClient,
 	}
@@ -199,7 +205,9 @@ func (c *Client) connect() error {
 	conn, err := net.Dial("tcp", c.peer)
 	if err == nil {
 		c.log("connected")
-		msgConn, err := NewMsgConn(conn, c.handlePacket, c.notifyClose)
+		msgConn, err := NewMsgConn(conn, c.config.MinFlushPeriod,
+			c.config.WriteBufferSize,
+			c.handlePacket, c.notifyClose)
 		if err != nil {
 			return err
 		}

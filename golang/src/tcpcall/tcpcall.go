@@ -9,13 +9,18 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
+	"log"
 	"os"
+	"strconv"
+	"time"
 )
 
 var (
 	traceClient bool
 	tracePool   bool
 	traceServer bool
+	defWBufSize               = 0xffff
+	defMinFlush time.Duration = 0
 )
 
 func init() {
@@ -25,4 +30,20 @@ func init() {
 	tracePool = 0 < len(s)
 	s = os.Getenv("TCPCALL_SERVER_TRACE")
 	traceServer = 0 < len(s)
+	if s := os.Getenv("TCPCALL_W_BUF_SIZE"); 0 < len(s) {
+		i, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			log.Fatalf("bad value %#v for"+
+				" write buffer size: %s", s, err)
+		}
+		defWBufSize = int(i)
+	}
+	if s := os.Getenv("TCPCALL_W_BUF_MIN_FLUSH_PERIOD"); 0 < len(s) {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			log.Fatalf("bad value %#v for write"+
+				" buffer min flush period: %s", s, err)
+		}
+		defMinFlush = d
+	}
 }
