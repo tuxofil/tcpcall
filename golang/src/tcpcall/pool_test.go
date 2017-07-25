@@ -128,7 +128,8 @@ func TestWorkersCount(t *testing.T) {
 	}
 
 	s1Conf := NewServerConf()
-	s1, err := Listen(5024, s1Conf)
+	s1Conf.PortNumber = 5024
+	s1, err := Listen(s1Conf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +143,8 @@ func TestWorkersCount(t *testing.T) {
 	}
 
 	s2Conf := NewServerConf()
-	s2, err := Listen(5025, s2Conf)
+	s2Conf.PortNumber = 5025
+	s2, err := Listen(s2Conf)
 	if err != nil {
 		t.Fatal(err)
 	}

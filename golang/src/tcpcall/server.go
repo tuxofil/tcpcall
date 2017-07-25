@@ -32,6 +32,8 @@ type Server struct {
 
 // Server configuration
 type ServerConf struct {
+	// TCP port number to listen
+	PortNumber uint16
 	// Maximum simultaneous connections to accept
 	MaxConnections int
 	// Maximum request processing concurrency per connection.
@@ -64,8 +66,8 @@ type ServerConn struct {
 }
 
 // Start new server.
-func Listen(port uint16, conf ServerConf) (*Server, error) {
-	bindAddr := fmt.Sprintf(":%d", port)
+func Listen(conf ServerConf) (*Server, error) {
+	bindAddr := fmt.Sprintf(":%d", conf.PortNumber)
 	socket, err := net.Listen("tcp", bindAddr)
 	if err == nil {
 		server := &Server{

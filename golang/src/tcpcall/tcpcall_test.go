@@ -242,7 +242,8 @@ func startServers(t *testing.T, ports ...uint16) []*Server {
 
 func startServer(t *testing.T, port uint16) *Server {
 	log.Printf("starting server at %d...", port)
-	s, err := Listen(port, server_conf)
+	server_conf.PortNumber = port
+	s, err := Listen(server_conf)
 	if err != nil {
 		t.Fatal(err)
 		return nil
@@ -256,13 +257,14 @@ func startDumbServers(t *testing.T, ports ...uint16) []*Server {
 		j := i
 		log.Printf("starting dumb server#i at %d...", ports[i])
 		server_conf := NewServerConf()
+		server_conf.PortNumber = ports[i]
 		server_conf.RequestCallback = func([]byte) []byte {
 			reply := make([]byte, 8)
 			binary.BigEndian.PutUint64(reply, uint64(j))
 			return reply
 		}
 		server_conf.Trace = trace_enabled
-		s, err := Listen(ports[i], server_conf)
+		s, err := Listen(server_conf)
 		if err != nil {
 			t.Fatal(err)
 		}
