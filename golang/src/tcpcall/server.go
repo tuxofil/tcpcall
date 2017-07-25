@@ -44,10 +44,10 @@ type ServerConf struct {
 	WriteBufferSize int
 	// Request processing function.
 	// Each request will be processed in parallel with others.
-	RequestCallback *func([]byte) []byte
+	RequestCallback func([]byte) []byte
 	// Asynchronous request (cast) processing function.
 	// Each request will be processed in parallel with others.
-	CastCallback *func([]byte)
+	CastCallback func([]byte)
 	// Duration for suspend signals
 	SuspendDuration time.Duration
 	// Enable debug logging or not
@@ -223,9 +223,8 @@ func (h *ServerConn) onRecv(packet []byte) {
 		case proto.REQUEST:
 			h.processRequest(data.(*proto.PacketRequest))
 		case proto.CAST:
-			if h.server.config.CastCallback != nil {
-				(*h.server.config.CastCallback)(
-					flatten((data.(*proto.PacketCast)).Request))
+			if f := h.server.config.CastCallback; f != nil {
+				f(flatten((data.(*proto.PacketCast)).Request))
 			}
 		default:
 			// ignore packet
@@ -263,8 +262,7 @@ func (h *ServerConn) writePacket(packet proto.Packet) error {
 // Process synchronous request from the client.
 func (h *ServerConn) processRequest(req *proto.PacketRequest) {
 	var res []byte
-	if h.server.config.RequestCallback != nil {
-		f := *h.server.config.RequestCallback
+	if f := h.server.config.RequestCallback; f != nil {
 		res = f(flatten(req.Request))
 	} else {
 		res = []byte{}

@@ -220,10 +220,8 @@ var pool_conf PoolConf
 func init() {
 	ANY = errors.New("any error")
 	server_conf = NewServerConf()
-	f1 := RequestCallback
-	server_conf.RequestCallback = &f1
-	f2 := CastCallback
-	server_conf.CastCallback = &f2
+	server_conf.RequestCallback = RequestCallback
+	server_conf.CastCallback = CastCallback
 	server_conf.Trace = trace_enabled
 	client_conf = NewClientConf()
 	client_conf.ReconnectPeriod = time.Millisecond * 5
@@ -258,12 +256,11 @@ func startDumbServers(t *testing.T, ports ...uint16) []*Server {
 		j := i
 		log.Printf("starting dumb server#i at %d...", ports[i])
 		server_conf := NewServerConf()
-		f1 := func([]byte) []byte {
+		server_conf.RequestCallback = func([]byte) []byte {
 			reply := make([]byte, 8)
 			binary.BigEndian.PutUint64(reply, uint64(j))
 			return reply
 		}
-		server_conf.RequestCallback = &f1
 		server_conf.Trace = trace_enabled
 		s, err := Listen(ports[i], server_conf)
 		if err != nil {
