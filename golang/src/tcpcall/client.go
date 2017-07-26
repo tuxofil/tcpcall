@@ -62,13 +62,13 @@ type ClientConf struct {
 	// Socket write buffer size
 	WriteBufferSize int
 	// Channel to send state events (connected/disconnected).
-	StateListener *chan StateEvent
+	StateListener chan StateEvent
 	// Channel to send 'suspend' events.
-	SuspendListener *chan SuspendEvent
+	SuspendListener chan SuspendEvent
 	// Channel to send 'resume' events.
-	ResumeListener *chan ResumeEvent
+	ResumeListener chan ResumeEvent
 	// Channel to send Uplink Cast data.
-	UplinkCastListener *chan UplinkCastEvent
+	UplinkCastListener chan UplinkCastEvent
 	// If true, Dial() function will attempt to connect to the
 	// server before returning. Default is true.
 	SyncConnect bool
@@ -274,7 +274,7 @@ func (c *Client) notifyClose() {
 func (c *Client) notifyPool(connected bool) {
 	if c.config.StateListener != nil && !c.closed {
 		select {
-		case (*c.config.StateListener) <- StateEvent{c, connected}:
+		case c.config.StateListener <- StateEvent{c, connected}:
 		case <-time.After(time.Second / 5):
 		}
 	}
@@ -305,16 +305,16 @@ func (c *Client) handlePacket(packet []byte) {
 	case proto.FLOW_CONTROL_SUSPEND:
 		if c.config.SuspendListener != nil {
 			p := payload.(*proto.PacketFlowControlSuspend)
-			(*c.config.SuspendListener) <- SuspendEvent{c, p.Duration}
+			c.config.SuspendListener <- SuspendEvent{c, p.Duration}
 		}
 	case proto.FLOW_CONTROL_RESUME:
 		if c.config.ResumeListener != nil {
-			(*c.config.ResumeListener) <- ResumeEvent{c}
+			c.config.ResumeListener <- ResumeEvent{c}
 		}
 	case proto.UPLINK_CAST:
 		if c.config.UplinkCastListener != nil {
 			p := payload.(*proto.PacketUplinkCast)
-			(*c.config.UplinkCastListener) <- UplinkCastEvent{c, flatten(p.Data)}
+			c.config.UplinkCastListener <- UplinkCastEvent{c, flatten(p.Data)}
 		}
 	}
 }

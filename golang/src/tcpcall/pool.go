@@ -40,11 +40,11 @@ type PoolConf struct {
 	// If not nil, result of the function will take
 	// precedence of Peers value.
 	// Set it to allow auto reconfiguration.
-	PeersFetcher *func() []string
+	PeersFetcher func() []string
 	// Sleep duration between reconfiguration attempts.
 	ReconfigPeriod time.Duration
 	// Channel to send Uplink Cast data.
-	UplinkCastListener *chan UplinkCastEvent
+	UplinkCastListener chan UplinkCastEvent
 	// Maximum parallel requests for the connection.
 	Concurrency int
 	// Sleep duration before reconnect after connection failure.
@@ -232,7 +232,7 @@ func (p *Pool) GetActiveQueuedRequests() (count int) {
 // Get peers list from configuration.
 func (p *Pool) getPeers() []string {
 	if p.config.PeersFetcher != nil {
-		return (*p.config.PeersFetcher)()
+		return p.config.PeersFetcher()
 	}
 	return p.config.Peers
 }
@@ -329,9 +329,9 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.MaxReplySize = p.config.MaxReplySize
 	cfg.MinFlushPeriod = p.config.MinFlushPeriod
 	cfg.WriteBufferSize = p.config.WriteBufferSize
-	cfg.StateListener = &p.stateEvents
-	cfg.SuspendListener = &p.suspendEvents
-	cfg.ResumeListener = &p.resumeEvents
+	cfg.StateListener = p.stateEvents
+	cfg.SuspendListener = p.suspendEvents
+	cfg.ResumeListener = p.resumeEvents
 	cfg.UplinkCastListener = p.config.UplinkCastListener
 	cfg.SyncConnect = false
 	cfg.Trace = p.config.ClientTrace

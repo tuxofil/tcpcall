@@ -31,10 +31,9 @@ func TestApplyPeers(t *testing.T) {
 	cfg := []string{}
 	pool_conf := NewPoolConf()
 	pool_conf.ReconfigPeriod = time.Millisecond
-	fetcher := func() []string {
+	pool_conf.PeersFetcher = func() []string {
 		return cfg
 	}
-	pool_conf.PeersFetcher = &fetcher
 
 	log.Printf("creating pool")
 	pool := NewPool(pool_conf)
@@ -104,10 +103,9 @@ func TestWorkersCount(t *testing.T) {
 	poolConf := NewPoolConf()
 	poolConf.ReconfigPeriod = time.Millisecond
 	poolConf.ReconnectPeriod = time.Millisecond
-	fetcher := func() []string {
+	poolConf.PeersFetcher = func() []string {
 		return cfg
 	}
-	poolConf.PeersFetcher = &fetcher
 	pool := NewPool(poolConf)
 
 	if pool.GetWorkersCount() != 0 {
