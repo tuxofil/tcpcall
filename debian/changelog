@@ -1,3 +1,11 @@
+tcpcall (2.0.0) unstable; urgency=low
+
+  * golang: client & pool: simplify configuration
+  * golang: make port number part of server config
+  * golang: server: simplify configuration
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Thu, 27 Jul 2017 23:03:44 +0300
+
 tcpcall (1.9.0) unstable; urgency=low
 
   * optimisation: add buffering before sending data to the network
