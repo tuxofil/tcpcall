@@ -1,3 +1,9 @@
+tcpcall (2.1.0) unstable; urgency=low
+
+  * golang: request sharder
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Fri, 13 Oct 2017 16:39:48 +0300
+
 tcpcall (2.0.0) unstable; urgency=low
 
   * golang: client & pool: simplify configuration
