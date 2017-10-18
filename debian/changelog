@@ -1,3 +1,10 @@
+tcpcall (2.2.0) unstable; urgency=low
+
+  * golang pool: configure conns count per node
+  * golang: add TCPCALL_CONCURRENCY env setting
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 18 Oct 2017 21:15:58 +0300
+
 tcpcall (2.1.0) unstable; urgency=low
 
   * golang: request sharder
