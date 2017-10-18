@@ -16,14 +16,23 @@ import (
 )
 
 var (
-	traceClient bool
-	tracePool   bool
-	traceServer bool
-	defWBufSize               = 0xffff
-	defMinFlush time.Duration = 0
+	traceClient    bool
+	tracePool      bool
+	traceServer    bool
+	defConcurrency               = 100
+	defWBufSize                  = 0xffff
+	defMinFlush    time.Duration = 0
 )
 
 func init() {
+	if s := os.Getenv("TCPCALL_CONCURRENCY"); s != "" {
+		i, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			log.Fatalf("bad value %#v for"+
+				" write buffer size: %s", s, err)
+		}
+		defConcurrency = int(i)
+	}
 	s := os.Getenv("TCPCALL_CLIENT_TRACE")
 	traceClient = 0 < len(s)
 	s = os.Getenv("TCPCALL_POOL_TRACE")

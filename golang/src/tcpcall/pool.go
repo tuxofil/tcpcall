@@ -45,7 +45,7 @@ type PoolConf struct {
 	ReconfigPeriod time.Duration
 	// Channel to send Uplink Cast data.
 	UplinkCastListener chan UplinkCastEvent
-	// Maximum parallel requests for the connection.
+	// Maximum parallel requests for one connection.
 	Concurrency int
 	// Sleep duration before reconnect after connection failure.
 	ReconnectPeriod time.Duration
@@ -83,7 +83,7 @@ func NewPoolConf() PoolConf {
 		Peers:           []string{},
 		PeersFetcher:    nil,
 		ReconfigPeriod:  time.Second * 5,
-		Concurrency:     1000,
+		Concurrency:     defConcurrency,
 		ReconnectPeriod: time.Millisecond * 100,
 		MinFlushPeriod:  defMinFlush,
 		WriteBufferSize: defWBufSize,

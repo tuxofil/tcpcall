@@ -125,7 +125,7 @@ func Dial(dst string, conf ClientConf) (c *Client, err error) {
 // Create default client configuration
 func NewClientConf() ClientConf {
 	return ClientConf{
-		Concurrency:     1000,
+		Concurrency:     defConcurrency,
 		ReconnectPeriod: time.Millisecond * 100,
 		MinFlushPeriod:  defMinFlush,
 		WriteBufferSize: defWBufSize,
