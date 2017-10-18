@@ -18,6 +18,7 @@ type Sharder struct {
 type SharderConfig struct {
 	NodesGetter    func() ([]string, error)
 	ReconfigPeriod time.Duration
+	ConnsPerNode   int
 }
 
 func NewSharder(config SharderConfig) *Sharder {
@@ -37,6 +38,7 @@ func NewSharderConfig() SharderConfig {
 			return []string{}, nil
 		},
 		ReconfigPeriod: 10 * time.Second,
+		ConnsPerNode:   5,
 	}
 }
 
@@ -74,7 +76,11 @@ func (s *Sharder) setNodes(newNodes []string) {
 	for _, n := range newNodes {
 		if _, ok := s.conns[n]; !ok {
 			poolCfg := NewPoolConf()
-			poolCfg.Peers = []string{n, n, n, n, n}
+			peers := make([]string, s.config.ConnsPerNode)
+			for i := 0; i < s.config.ConnsPerNode; i++ {
+				peers[i] = n
+			}
+			poolCfg.Peers = peers
 			s.conns[n] = NewPool(poolCfg)
 		}
 	}
