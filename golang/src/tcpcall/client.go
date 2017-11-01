@@ -111,7 +111,7 @@ func Dial(dst string, conf ClientConf) (c *Client, err error) {
 	c = &Client{
 		peer:       dst,
 		config:     conf,
-		registry:   make(RRegistry, conf.Concurrency),
+		registry:   RRegistry{},
 		registryMu: &sync.Mutex{},
 		closeChan:  make(chan bool, 50),
 	}
@@ -244,7 +244,7 @@ func (c *Client) disconnect() {
 		default:
 		}
 	}
-	c.registry = make(RRegistry, c.config.Concurrency)
+	c.registry = RRegistry{}
 	c.registryMu.Unlock()
 	c.log("disconnected")
 }
