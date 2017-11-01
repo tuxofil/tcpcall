@@ -152,7 +152,7 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 		}
 		seqnum := binary.BigEndian.Uint32(bytes[1:])
 		micros := binary.BigEndian.Uint64(bytes[5:13])
-		deadline := time.Unix(int64(micros/1000000), 0)
+		deadline := time.Unix(0, int64(micros*1000))
 		return ptype, &PacketRequest{seqnum, deadline, [][]byte{bytes[13:]}}, nil
 	case CAST:
 		if len(bytes) < 5 {
