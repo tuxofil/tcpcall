@@ -142,18 +142,18 @@ func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err err
 
 // Make synchronous request to the server.
 func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte, err error) {
-	// queue
-	c.registryMu.Lock()
-	if c.config.Concurrency <= len(c.registry) {
-		c.registryMu.Unlock()
-		return nil, OverloadError
-	}
 	entry := &RREntry{
 		Deadline: time.Now().Add(timeout),
 		Chan:     make(chan RRReply, 1),
 	}
 	req := proto.NewRequest(payload, entry.Deadline)
 	encoded := req.Encode()
+	// queue
+	c.registryMu.Lock()
+	if c.config.Concurrency <= len(c.registry) {
+		c.registryMu.Unlock()
+		return nil, OverloadError
+	}
 	c.registry[req.SeqNum] = entry
 	c.registryMu.Unlock()
 	// send through the network
