@@ -12,6 +12,7 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -168,7 +169,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 	select {
 	case reply := <-entry.Chan:
 		if reply.Error == nil {
-			return flatten(reply.Reply), nil
+			return bytes.Join(reply.Reply, []byte{}), nil
 		}
 		return nil, RemoteCrashedError
 	case <-time.After(entry.Deadline.Sub(time.Now())):
@@ -315,7 +316,8 @@ func (c *Client) handlePacket(packet []byte) {
 	case proto.UPLINK_CAST:
 		if c.config.UplinkCastListener != nil {
 			p := payload.(*proto.PacketUplinkCast)
-			c.config.UplinkCastListener <- UplinkCastEvent{c, flatten(p.Data)}
+			flat := bytes.Join(p.Data, []byte{})
+			c.config.UplinkCastListener <- UplinkCastEvent{c, flat}
 		}
 	}
 }
@@ -337,25 +339,4 @@ func (c *Client) log(format string, args ...interface{}) {
 		prefix := fmt.Sprintf("tcpcall conn %s> ", c.peer)
 		log.Printf(prefix+format, args...)
 	}
-}
-
-// Convert array of []byte to plain []byte
-func flatten(data [][]byte) []byte {
-	switch len(data) {
-	case 0:
-		return []byte{}
-	case 1:
-		return data[0]
-	}
-	totalLen := 0
-	for _, e := range data {
-		totalLen += len(e)
-	}
-	res := make([]byte, totalLen)
-	offset := 0
-	for _, e := range data {
-		copy(res[offset:], e)
-		offset += len(e)
-	}
-	return res
 }

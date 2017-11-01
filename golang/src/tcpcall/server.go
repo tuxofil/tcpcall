@@ -12,6 +12,7 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -226,7 +227,9 @@ func (h *ServerConn) onRecv(packet []byte) {
 			h.processRequest(data.(*proto.PacketRequest))
 		case proto.CAST:
 			if f := h.server.config.CastCallback; f != nil {
-				f(flatten((data.(*proto.PacketCast)).Request))
+				f(bytes.Join(
+					(data.(*proto.PacketCast)).Request,
+					[]byte{}))
 			}
 		default:
 			// ignore packet
@@ -265,7 +268,7 @@ func (h *ServerConn) writePacket(packet proto.Packet) error {
 func (h *ServerConn) processRequest(req *proto.PacketRequest) {
 	var res []byte
 	if f := h.server.config.RequestCallback; f != nil {
-		res = f(flatten(req.Request))
+		res = f(bytes.Join(req.Request, []byte{}))
 	} else {
 		res = []byte{}
 	}
