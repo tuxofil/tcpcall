@@ -154,6 +154,10 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 		c.registryMu.Unlock()
 		return nil, OverloadError
 	}
+	// as far as seqnum is uint32, we'll do no checks
+	// for seqnum collision here. It's unlikely someone
+	// will use concurrency greater than 2^32 to make
+	// such collisions possible.
 	c.registry[req.SeqNum] = entry
 	c.registryMu.Unlock()
 	defer c.popRegistry(req.SeqNum)
