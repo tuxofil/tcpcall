@@ -63,8 +63,11 @@ type PacketUplinkCast struct {
 	Data [][]byte
 }
 
-var seq SeqNum
-var seqMutex = sync.Mutex{}
+// packet sequence number generator state
+var (
+	gSeq   SeqNum
+	gSeqMu = sync.Mutex{}
+)
 
 // Create new request packet.
 func NewRequest(request [][]byte, deadline time.Time) *PacketRequest {
@@ -185,10 +188,11 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 	return -1, nil, errors.New("Not implemented")
 }
 
-// Generate sequence number (aka request ID).
+// Generate sequence number (aka packet ID).
 func getSeqNum() SeqNum {
-	seqMutex.Lock()
-	defer seqMutex.Unlock()
-	defer func() { seq++ }()
-	return seq
+	gSeqMu.Lock()
+	res := gSeq
+	gSeq++
+	gSeqMu.Unlock()
+	return res
 }
