@@ -156,9 +156,9 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 	}
 	c.registry[req.SeqNum] = entry
 	c.registryMu.Unlock()
+	defer c.popRegistry(req.SeqNum)
 	// send through the network
 	if err := c.socket.Send(encoded); err != nil {
-		c.popRegistry(req.SeqNum)
 		if err == MsgConnNotConnectedError {
 			return nil, NotConnectedError
 		}
@@ -173,7 +173,6 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 		}
 		return nil, RemoteCrashedError
 	case <-time.After(entry.Deadline.Sub(time.Now())):
-		c.popRegistry(req.SeqNum)
 		return nil, TimeoutError
 	}
 }
