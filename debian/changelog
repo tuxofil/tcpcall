@@ -1,3 +1,18 @@
+tcpcall (2.2.1) unstable; urgency=low
+
+  * golang: do not loose microseconds while decoding deadline
+  * golang: add some comments
+  * golang: remove redundant SeqNum type
+  * golang (style): refactor global vars names
+  * golang (style): use more idiomatic way for map lookup
+  * golang bugfix: request registry: always remove records
+  * golang: optimize access to requests registry
+  * golang: replace flatten() function with bytes.Join()
+  * golang (style): simplify requests registry creation
+  * golang bugfix: add missing lock release
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Wed, 01 Nov 2017 15:19:32 +0200
+
 tcpcall (2.2.0) unstable; urgency=low
 
   * golang pool: configure conns count per node
