@@ -144,6 +144,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 	// queue
 	c.registryMu.Lock()
 	if c.config.Concurrency <= len(c.registry) {
+		c.registryMu.Unlock()
 		return nil, OverloadError
 	}
 	entry := &RREntry{
