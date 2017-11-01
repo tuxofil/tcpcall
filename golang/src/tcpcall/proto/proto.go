@@ -25,30 +25,28 @@ const (
 	UPLINK_CAST          = 6
 )
 
-type SeqNum uint32
-
 type Packet interface {
 	Encode() [][]byte
 }
 
 type PacketRequest struct {
-	SeqNum
+	SeqNum   uint32
 	Deadline time.Time
 	Request  [][]byte
 }
 
 type PacketReply struct {
-	SeqNum
-	Reply [][]byte
+	SeqNum uint32
+	Reply  [][]byte
 }
 
 type PacketError struct {
-	SeqNum
+	SeqNum uint32
 	Reason [][]byte
 }
 
 type PacketCast struct {
-	SeqNum
+	SeqNum  uint32
 	Request [][]byte
 }
 
@@ -65,7 +63,7 @@ type PacketUplinkCast struct {
 
 // packet sequence number generator state
 var (
-	gSeq   SeqNum
+	gSeq   uint32
 	gSeqMu = sync.Mutex{}
 )
 
@@ -152,7 +150,7 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 		if len(bytes) < 13 {
 			return -1, nil, errors.New("bad Request packet: header too small")
 		}
-		seqnum := SeqNum(binary.BigEndian.Uint32(bytes[1:5]))
+		seqnum := binary.BigEndian.Uint32(bytes[1:])
 		micros := binary.BigEndian.Uint64(bytes[5:13])
 		deadline := time.Unix(int64(micros/1000000), 0)
 		return ptype, &PacketRequest{seqnum, deadline, [][]byte{bytes[13:]}}, nil
@@ -160,19 +158,19 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 		if len(bytes) < 5 {
 			return -1, nil, errors.New("bad Cast packet: header too small")
 		}
-		seqnum := SeqNum(binary.BigEndian.Uint32(bytes[1:5]))
+		seqnum := binary.BigEndian.Uint32(bytes[1:])
 		return ptype, &PacketCast{seqnum, [][]byte{bytes[5:]}}, nil
 	case REPLY:
 		if len(bytes) < 5 {
 			return -1, nil, errors.New("bad Reply packet: header too small")
 		}
-		seqnum := SeqNum(binary.BigEndian.Uint32(bytes[1:5]))
+		seqnum := binary.BigEndian.Uint32(bytes[1:])
 		return ptype, &PacketReply{seqnum, [][]byte{bytes[5:]}}, nil
 	case ERROR:
 		if len(bytes) < 5 {
 			return -1, nil, errors.New("bad Error packet: header too small")
 		}
-		seqnum := SeqNum(binary.BigEndian.Uint32(bytes[1:5]))
+		seqnum := binary.BigEndian.Uint32(bytes[1:])
 		return ptype, &PacketError{seqnum, [][]byte{bytes[5:]}}, nil
 	case FLOW_CONTROL_SUSPEND:
 		if len(bytes) < 9 {
@@ -189,7 +187,7 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 }
 
 // Generate sequence number (aka packet ID).
-func getSeqNum() SeqNum {
+func getSeqNum() uint32 {
 	gSeqMu.Lock()
 	res := gSeq
 	gSeq++

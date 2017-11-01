@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-type RRegistry map[proto.SeqNum]*RREntry
+type RRegistry map[uint32]*RREntry
 
 type RREntry struct {
 	Deadline time.Time
@@ -322,7 +322,7 @@ func (c *Client) handlePacket(packet []byte) {
 }
 
 // Lookup request in the registry and remove it.
-func (c *Client) popRegistry(seqnum proto.SeqNum) (e *RREntry, ok bool) {
+func (c *Client) popRegistry(seqnum uint32) (e *RREntry, ok bool) {
 	c.registryMu.Lock()
 	res, ok := c.registry[seqnum]
 	if ok {
