@@ -295,12 +295,12 @@ func (c *Client) handlePacket(packet []byte) {
 	switch ptype {
 	case proto.REPLY:
 		p := payload.(*proto.PacketReply)
-		if entry := c.popRegistry(p.SeqNum); entry != nil {
+		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{p.Reply, nil}
 		}
 	case proto.ERROR:
 		p := payload.(*proto.PacketError)
-		if entry := c.popRegistry(p.SeqNum); entry != nil {
+		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{nil, p.Reason}
 		}
 	case proto.FLOW_CONTROL_SUSPEND:
@@ -322,14 +322,14 @@ func (c *Client) handlePacket(packet []byte) {
 }
 
 // Lookup request in the registry and remove it.
-func (c *Client) popRegistry(seqnum proto.SeqNum) *RREntry {
+func (c *Client) popRegistry(seqnum proto.SeqNum) (e *RREntry, ok bool) {
 	c.registryMu.Lock()
-	defer c.registryMu.Unlock()
-	res := c.registry[seqnum]
-	if res != nil {
+	res, ok := c.registry[seqnum]
+	if ok {
 		delete(c.registry, seqnum)
 	}
-	return res
+	c.registryMu.Unlock()
+	return res, ok
 }
 
 // Print message to the stdout if verbose mode is enabled.
