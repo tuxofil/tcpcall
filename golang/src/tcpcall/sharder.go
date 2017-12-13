@@ -1,3 +1,13 @@
+/**
+Sharder allows to balance requests among configured nodes
+according to some request ID. Each request with the same ID
+will be routed to the same node.
+
+Author: Aleksey Morarash <aleksey.morarash@gmail.com>
+Since: 13 Oct 2017
+Copyright: 2017, Aleksey Morarash <aleksey.morarash@gmail.com>
+*/
+
 package tcpcall
 
 import (
@@ -9,18 +19,27 @@ import (
 )
 
 type Sharder struct {
+	// Configuration used to create Sharder instance
 	config SharderConfig
-	nodes  []string
-	conns  map[string]*Pool
-	mu     *sync.RWMutex
+	// List of servers actually used
+	nodes []string
+	// Map server hostname to connection pool
+	conns map[string]*Pool
+	// Controls access to the map of connection pools
+	mu *sync.RWMutex
 }
 
+// Sharder configuration
 type SharderConfig struct {
-	NodesGetter    func() ([]string, error)
+	// Callback function used to get list of servers
+	NodesGetter func() ([]string, error)
+	// How often NodesGetter will be called
 	ReconfigPeriod time.Duration
-	ConnsPerNode   int
+	// How many connections will be established to each server
+	ConnsPerNode int
 }
 
+// Create new Sharder instance with given configuration.
 func NewSharder(config SharderConfig) *Sharder {
 	sharder := &Sharder{
 		config: config,
@@ -32,6 +51,7 @@ func NewSharder(config SharderConfig) *Sharder {
 	return sharder
 }
 
+// Create default configuration for Sharder.
 func NewSharderConfig() SharderConfig {
 	return SharderConfig{
 		NodesGetter: func() ([]string, error) {
@@ -42,6 +62,8 @@ func NewSharderConfig() SharderConfig {
 	}
 }
 
+// Send request to one of configured servers. ID will not
+// be sent, but used only to balance request between servers.
 func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -53,11 +75,14 @@ func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err
 	return s.conns[s.nodes[i]].Req(body, timeout)
 }
 
+// Sharding function.
 func shard(id []byte, n int) int {
 	hash := md5.Sum(id)
 	return int(binary.BigEndian.Uint64(hash[:8]) % uint64(n))
 }
 
+// Goroutine.
+// Reconfigure clients pool on the fly.
 func (s *Sharder) reconfigLoop() {
 	for {
 		if nodes, err := s.config.NodesGetter(); err == nil {
@@ -69,10 +94,11 @@ func (s *Sharder) reconfigLoop() {
 	}
 }
 
+// Apply new node list to the clients pool.
 func (s *Sharder) setNodes(newNodes []string) {
+	newNodes = uniq(newNodes)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	newNodes = uniq(newNodes)
 	for _, n := range newNodes {
 		if _, ok := s.conns[n]; !ok {
 			poolCfg := NewPoolConf()
@@ -93,6 +119,7 @@ func (s *Sharder) setNodes(newNodes []string) {
 	s.nodes = newNodes
 }
 
+// Leave only unique elements from a string array.
 func uniq(a []string) []string {
 	r := []string{}
 	for _, v := range a {
@@ -103,6 +130,7 @@ func uniq(a []string) []string {
 	return r
 }
 
+// Return truth if array a contains string s at least once.
 func inList(s string, a []string) bool {
 	for _, e := range a {
 		if s == e {
