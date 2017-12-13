@@ -21,6 +21,48 @@ import (
 	"time"
 )
 
+// Server counter indices.
+const (
+	// when new TCP connection established
+	SC_ACCEPTED = iota
+	// failed to accept new incoming connection
+	SC_ACCEPT_ERRORS
+	// too many incoming connections already exist
+	SC_ACCEPT_OVERFLOWS
+	// client connection handler creation error
+	SC_HANDLER_CREATE_ERRORS
+	// new packet received from the client
+	SC_PACKET_INPUT
+	// too many request processors (incoming packet
+	// will be dropped without processing)
+	SC_CONCURRENCY_OVERFLOWS
+	// we're about sending suspend signal to the client
+	SC_SUSPEND_REQUESTED
+	// suspend signal not sent due to error
+	SC_SUSPEND_REQUEST_ERRORS
+	// we're about sending resume signal to the client
+	SC_RESUME_REQUESTED
+	// resume signal not sent due to error
+	SC_RESUME_REQUEST_ERRORS
+	// we're about sending packet back to the client
+	SC_PACKET_WRITE
+	// packet not sent due to error
+	SC_PACKET_WRITE_ERRORS
+	// new request processing worker (goroutine) created
+	SC_WORKER_ADDED
+	// request processing worker (goroutine) finished
+	SC_WORKER_REMOVED
+	// failed to decode packet received from the client
+	SC_PACKET_DECODE_ERRORS
+	// sync request received
+	SC_REQUESTS
+	// async request received
+	SC_CASTS
+	// unknown request received (and left without processing)
+	SC_UNKNOWN
+	SC_COUNT // special value - count of all counters
+)
+
 // Server state
 type Server struct {
 	// IP address and TCP port number used for listening
@@ -36,6 +78,9 @@ type Server struct {
 	lock *sync.Mutex
 	// Set to truth when server is about to terminate.
 	stopFlag bool
+	// Counters array
+	counters   []int
+	countersMu sync.Locker
 }
 
 // Server configuration
@@ -93,6 +138,8 @@ func Listen(conf ServerConf) (*Server, error) {
 			socket:      socket,
 			connections: make(map[*ServerConn]bool, conf.MaxConnections),
 			lock:        &sync.Mutex{},
+			counters:    make([]int, SC_COUNT),
+			countersMu:  &sync.Mutex{},
 		}
 		go server.acceptLoop()
 		return server, nil
@@ -148,11 +195,14 @@ func (s *Server) acceptLoop() {
 	defer s.log("daemon terminated")
 	for !s.stopFlag {
 		if s.config.MaxConnections <= len(s.connections) {
+			s.counters[SC_ACCEPT_OVERFLOWS]++
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
 		socket, err := s.socket.Accept()
+		s.counters[SC_ACCEPTED]++
 		if err != nil {
+			s.counters[SC_ACCEPT_ERRORS]++
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
@@ -170,6 +220,7 @@ func (s *Server) acceptLoop() {
 			s.config.WriteBufferSize,
 			h.onRecv, h.onClose)
 		if err != nil {
+			s.counters[SC_HANDLER_CREATE_ERRORS]++
 			socket.Close()
 			continue
 		}
@@ -207,6 +258,22 @@ func (s *Server) log(format string, args ...interface{}) {
 	}
 }
 
+// Thread safe counter increment.
+func (s *Server) hit(counter int) {
+	s.countersMu.Lock()
+	s.counters[counter]++
+	s.countersMu.Unlock()
+}
+
+// Return snapshot of server internal counters.
+func (s *Server) Counters() []int {
+	res := make([]int, SC_COUNT)
+	s.countersMu.Lock()
+	defer s.countersMu.Unlock()
+	copy(res, s.counters)
+	return res
+}
+
 // Callback for message-oriented socket.
 // Handles connection close event.
 func (h *ServerConn) onClose() {
@@ -219,8 +286,10 @@ func (h *ServerConn) onClose() {
 // Callback for message-oriented socket.
 // Handles incoming message from the remote side.
 func (h *ServerConn) onRecv(packet []byte) {
+	h.server.hit(SC_PACKET_INPUT)
 	if h.server.config.Concurrency < h.workers {
 		// max workers count reached
+		h.server.hit(SC_CONCURRENCY_OVERFLOWS)
 		if err := h.suspend(h.server.config.SuspendDuration); err != nil {
 			h.log("suspend send: %v", err)
 			h.close()
@@ -233,6 +302,7 @@ func (h *ServerConn) onRecv(packet []byte) {
 		// decode packet
 		ptype, data, err := proto.Decode(packet)
 		if err != nil {
+			h.server.hit(SC_PACKET_DECODE_ERRORS)
 			h.log("packet decode failed: %v", err)
 			h.close()
 			return
@@ -240,8 +310,10 @@ func (h *ServerConn) onRecv(packet []byte) {
 		h.log("got packet of type %d: %v", ptype, data)
 		switch ptype {
 		case proto.REQUEST:
+			h.server.hit(SC_REQUESTS)
 			h.processRequest(data.(*proto.PacketRequest))
 		case proto.CAST:
+			h.server.hit(SC_CASTS)
 			if f := h.server.config.CastCallback; f != nil {
 				f(bytes.Join(
 					(data.(*proto.PacketCast)).Request,
@@ -249,20 +321,31 @@ func (h *ServerConn) onRecv(packet []byte) {
 			}
 		default:
 			// ignore packet
+			h.server.hit(SC_UNKNOWN)
 		}
 	}()
 }
 
 // Send 'suspend' signal to the connected client.
 func (h *ServerConn) suspend(duration time.Duration) error {
+	h.server.hit(SC_SUSPEND_REQUESTED)
 	packet := proto.PacketFlowControlSuspend{duration}
-	return h.writePacket(packet)
+	if err := h.writePacket(packet); err != nil {
+		h.server.hit(SC_SUSPEND_REQUEST_ERRORS)
+		return err
+	}
+	return nil
 }
 
 // Send 'resume' signal to the connected client.
 func (h *ServerConn) resume() error {
+	h.server.hit(SC_RESUME_REQUESTED)
 	packet := proto.PacketFlowControlResume{}
-	return h.writePacket(packet)
+	if err := h.writePacket(packet); err != nil {
+		h.server.hit(SC_RESUME_REQUEST_ERRORS)
+		return err
+	}
+	return nil
 }
 
 // Force close connection to the client.
@@ -273,7 +356,9 @@ func (h *ServerConn) close() {
 
 // Send packet back to the client side.
 func (h *ServerConn) writePacket(packet proto.Packet) error {
+	h.server.hit(SC_PACKET_WRITE)
 	if err := h.conn.Send(packet.Encode()); err != nil {
+		h.server.hit(SC_PACKET_WRITE_ERRORS)
 		h.log("packet write: %v", err)
 		return err
 	}
@@ -302,6 +387,7 @@ func (h *ServerConn) incrementWorkers() {
 	h.lock.Lock()
 	h.workers++
 	h.lock.Unlock()
+	h.server.hit(SC_WORKER_ADDED)
 }
 
 // Safely decrement workers count.
@@ -309,6 +395,7 @@ func (h *ServerConn) decrementWorkers() {
 	h.lock.Lock()
 	h.workers--
 	h.lock.Unlock()
+	h.server.hit(SC_WORKER_REMOVED)
 }
 
 // Print message to the stdout if verbose mode is enabled.
