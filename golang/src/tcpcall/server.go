@@ -23,12 +23,19 @@ import (
 
 // Server state
 type Server struct {
-	bindAddr    string
-	config      ServerConf
-	socket      net.Listener
+	// IP address and TCP port number used for listening
+	// incoming connections (colon separated).
+	bindAddr string
+	// Configuration used for server instance creation.
+	config ServerConf
+	// Server socket.
+	socket net.Listener
+	// List of established client connections.
 	connections map[*ServerConn]bool
-	lock        *sync.Mutex
-	stopFlag    bool
+	// Controls access to client connections map.
+	lock *sync.Mutex
+	// Set to truth when server is about to terminate.
+	stopFlag bool
 }
 
 // Server configuration
@@ -59,11 +66,20 @@ type ServerConf struct {
 
 // Connection handler state
 type ServerConn struct {
-	peer    string
-	conn    *MsgConn
+	// IP address and TCP port number of the other
+	// side of connection (client side).
+	peer string
+	// Message oriented connection
+	conn *MsgConn
+	// Number of currently running workers
+	// (actually worker is a goroutine handling one
+	// request received from the client).
 	workers int
-	lock    *sync.Mutex
-	server  *Server
+	// Controls access to conn object.
+	lock sync.Locker
+	// Link to the Server instance this conection
+	// is originated from.
+	server *Server
 }
 
 // Start new server.
