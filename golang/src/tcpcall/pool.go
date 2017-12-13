@@ -20,6 +20,42 @@ import (
 	"time"
 )
 
+// Connection pool counter indices.
+// See Pool.counters field and Pool.Counters()
+// method description for details.
+const (
+	// how many connection handlers were created
+	PC_WORKER_ADDED = iota
+	// how many connection handlers were removed
+	PC_WORKER_REMOVED
+	// one of connection handlers connects to the server
+	PC_WORKER_CONNECT
+	// one of connection handlers lost connection to the server
+	PC_WORKER_DISCONNECT
+	// reconfiguration loop ends
+	PC_RECONFIG
+	// connect/disconnect event received from one of
+	// connection handlers
+	PC_STATE_EVENT
+	// suspend signal received from one of connection handlers
+	PC_SUSPEND_EVENT
+	// resume signal received from one of connection handlers
+	PC_RESUME_EVENT
+	// Req() method called
+	PC_REQUESTS
+	// Request to the server failed
+	PC_REQUEST_ERRORS
+	// Request retry occured
+	PC_REQUEST_RETRIES
+	// Cast() method called
+	PC_CASTS
+	// Cast to the server failed.
+	PC_CAST_ERRORS
+	// Cast retry occured.
+	PC_CAST_RETRIES
+	PC_COUNT // special value - count of all counters
+)
+
 // Connection pool state.
 type Pool struct {
 	// Configuration used to create Pool instance
@@ -43,6 +79,9 @@ type Pool struct {
 	// Channel used to receive resume signals
 	// from the clients.
 	resumeEvents chan ResumeEvent
+	// Counters array
+	counters   []int
+	countersMu sync.Locker
 }
 
 // Connection pool configuration.
@@ -91,6 +130,8 @@ func NewPool(conf PoolConf) *Pool {
 		stateEvents:   make(chan StateEvent, 10),
 		suspendEvents: make(chan SuspendEvent, 10),
 		resumeEvents:  make(chan ResumeEvent, 10),
+		counters:      make([]int, PC_COUNT),
+		countersMu:    &sync.Mutex{},
 	}
 	go startEventListenerDaemon(&p)
 	go startConfiguratorDaemon(&p)
@@ -120,32 +161,47 @@ func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) 
 
 // Make request.
 func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err error) {
+	p.hit(PC_REQUESTS)
 	deadline := time.Now().Add(timeout)
 	retries := p.config.MaxRequestRetries
 	if retries < 0 {
 		retries = len(p.active)
 	}
-	err = NotConnectedError
+	var (
+		lastError error
+		retry     bool
+	)
 	for time.Now().Before(deadline) {
-		if c := p.getNextActive(); c != nil {
-			rep, err = c.ReqChunks(bytes, timeout)
-			if canFailover(err) {
-				if 0 < retries {
-					// try next connected server
-					retries--
-					continue
-				} else {
-					break
-				}
+		if retry {
+			p.hit(PC_REQUEST_RETRIES)
+		}
+		client := p.getNextActive()
+		if client == nil {
+			p.hit(PC_REQUEST_ERRORS)
+			return nil, NotConnectedError
+		}
+		rep, err = client.ReqChunks(bytes, timeout)
+		if err == nil {
+			return rep, nil
+		}
+		p.hit(PC_REQUEST_ERRORS)
+		lastError = err
+		if canFailover(err) {
+			if 0 < retries {
+				// try next connected server
+				retries--
+				retry = true
+				continue
+			} else {
+				break
 			}
-			return rep, err
 		}
 		return nil, err
 	}
 	if !time.Now().Before(deadline) {
 		return nil, TimeoutError
 	}
-	return nil, err
+	return nil, lastError
 }
 
 // Make asynchronous request to the server.
@@ -155,30 +211,36 @@ func (p *Pool) Cast(data []byte) error {
 
 // Make asynchronous request to the server.
 func (p *Pool) CastChunks(data [][]byte) error {
+	p.hit(PC_CASTS)
 	retries := p.config.MaxCastRetries
 	if retries < 0 {
 		retries = len(p.active)
 	}
-	var lastError error
+	var retry bool
 	for {
-		if c := p.getNextActive(); c != nil {
-			err := c.CastChunks(data)
-			if err == nil {
-				return nil
-			}
-			if canFailover(err) {
-				if 0 < retries {
-					// try next connected server
-					retries--
-					lastError = err
-					continue
-				}
-			}
-			return err
+		if retry {
+			p.hit(PC_CAST_RETRIES)
 		}
-		break
+		client := p.getNextActive()
+		if client == nil {
+			p.hit(PC_CAST_ERRORS)
+			return NotConnectedError
+		}
+		err := client.CastChunks(data)
+		if err == nil {
+			return nil
+		}
+		p.hit(PC_CAST_ERRORS)
+		if canFailover(err) {
+			if 0 < retries {
+				// try next connected server
+				retries--
+				retry = true
+				continue
+			}
+		}
+		return err
 	}
-	return lastError
 }
 
 // Return true if request can be retransmitted to another server.
@@ -282,6 +344,7 @@ func startEventListenerDaemon(p *Pool) {
 	for !p.stopFlag {
 		select {
 		case state_event := <-p.stateEvents:
+			p.counters[PC_STATE_EVENT]++
 			switch {
 			case state_event.Online:
 				p.publishWorker(state_event.Sender)
@@ -289,6 +352,7 @@ func startEventListenerDaemon(p *Pool) {
 				p.unpublishWorker(state_event.Sender)
 			}
 		case suspend := <-p.suspendEvents:
+			p.counters[PC_SUSPEND_EVENT]++
 			if p.unpublishWorker(suspend.Sender) {
 				go func() {
 					time.Sleep(suspend.Duration)
@@ -296,6 +360,7 @@ func startEventListenerDaemon(p *Pool) {
 				}()
 			}
 		case resume := <-p.resumeEvents:
+			p.counters[PC_RESUME_EVENT]++
 			p.publishWorker(resume.Sender)
 		case <-time.After(time.Millisecond * 200):
 		}
@@ -309,6 +374,7 @@ func startConfiguratorDaemon(p *Pool) {
 	defer p.log("reconfigurator daemon terminated")
 	for !p.stopFlag {
 		p.applyPeers(p.getPeers())
+		p.counters[PC_RECONFIG]++
 		time.Sleep(p.config.ReconfigPeriod)
 	}
 }
@@ -356,6 +422,7 @@ func (p *Pool) remWorker(index int) {
 	remFromArray(index, &p.clients)
 	p.unpublishWorker(worker)
 	worker.Close()
+	p.counters[PC_WORKER_REMOVED]++
 }
 
 // Add new client connection to the pool.
@@ -377,6 +444,7 @@ func (p *Pool) addWorker(index int, peer string) {
 	defer p.lock.Unlock()
 	p.log("adding worker for %s", peer)
 	addToArray(index, &p.clients, worker)
+	p.counters[PC_WORKER_ADDED]++
 }
 
 // Add client connection to the list of active (connected) workers.
@@ -389,6 +457,7 @@ func (p *Pool) publishWorker(c *Client) {
 	}
 	p.log("publishing %s", c.peer)
 	addToArray(0, &p.active, c)
+	p.counters[PC_WORKER_CONNECT]++
 }
 
 // Remove client connection from the list of active (connected) workers.
@@ -398,6 +467,7 @@ func (p *Pool) unpublishWorker(c *Client) bool {
 		if p.active[i] == c {
 			p.log("unpublishing %s", c.peer)
 			remFromArray(i, &p.active)
+			p.counters[PC_WORKER_DISCONNECT]++
 			return true
 		}
 	}
@@ -440,4 +510,20 @@ func (p *Pool) log(format string, args ...interface{}) {
 		prefix := fmt.Sprintf("tcpcall pool %v> ", p.getPeers())
 		log.Printf(prefix+format, args...)
 	}
+}
+
+// Thread safe increment of internal counter.
+func (p *Pool) hit(counter int) {
+	p.countersMu.Lock()
+	p.counters[counter]++
+	p.countersMu.Unlock()
+}
+
+// Return a snapshot of all internal counters.
+func (p *Pool) Counters() []int {
+	res := make([]int, PC_COUNT)
+	p.countersMu.Lock()
+	copy(res, p.counters)
+	p.countersMu.Unlock()
+	return res
 }
