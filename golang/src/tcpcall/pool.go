@@ -22,15 +22,27 @@ import (
 
 // Connection pool state.
 type Pool struct {
-	config          PoolConf
-	clients         []*Client
-	active          []*Client
+	// Configuration used to create Pool instance
+	config PoolConf
+	// List of all clients to all configured servers
+	clients []*Client
+	// List of clients known to be connected
+	active []*Client
+	// Pointer used for Round-Robin balancing
 	balancerPointer int
-	lock            sync.Locker
-	stopFlag        bool
-	stateEvents     chan StateEvent
-	suspendEvents   chan SuspendEvent
-	resumeEvents    chan ResumeEvent
+	// Controls access to client lists above
+	lock sync.Locker
+	// Set to truth when pool is about terminating
+	stopFlag bool
+	// Channel used to receive state change events from
+	// the clients (like connected/disconnected)
+	stateEvents chan StateEvent
+	// Channel used to receive suspend signals
+	// from the clients.
+	suspendEvents chan SuspendEvent
+	// Channel used to receive resume signals
+	// from the clients.
+	resumeEvents chan ResumeEvent
 }
 
 // Connection pool configuration.
