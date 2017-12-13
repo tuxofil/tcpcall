@@ -61,6 +61,14 @@ type PoolConf struct {
 	Concurrency int
 	// Sleep duration before reconnect after connection failure.
 	ReconnectPeriod time.Duration
+	// Request send max retry count. Negative value means count of
+	// currently connected servers, 0 means no retries will
+	// performed at all.
+	MaxRequestRetries int
+	// Asynchronous request send max retry count. Negative value
+	// means count of currently connected servers, 0 means no
+	// retries will performed at all.
+	MaxCastRetries int
 	// Max reply packet size, in bytes. 0 means no limit.
 	MaxReplySize int
 	// Minimum flush period for socket writer
@@ -92,14 +100,16 @@ func NewPool(conf PoolConf) *Pool {
 // Create default pool configuration.
 func NewPoolConf() PoolConf {
 	return PoolConf{
-		Peers:           []string{},
-		PeersFetcher:    nil,
-		ReconfigPeriod:  time.Second * 5,
-		Concurrency:     defConcurrency,
-		ReconnectPeriod: time.Millisecond * 100,
-		MinFlushPeriod:  defMinFlush,
-		WriteBufferSize: defWBufSize,
-		Trace:           tracePool,
+		Peers:             []string{},
+		PeersFetcher:      nil,
+		ReconfigPeriod:    time.Second * 5,
+		Concurrency:       defConcurrency,
+		ReconnectPeriod:   time.Millisecond * 100,
+		MaxRequestRetries: -1,
+		MaxCastRetries:    -1,
+		MinFlushPeriod:    defMinFlush,
+		WriteBufferSize:   defWBufSize,
+		Trace:             tracePool,
 	}
 }
 
@@ -111,15 +121,22 @@ func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) 
 // Make request.
 func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err error) {
 	deadline := time.Now().Add(timeout)
-	retry_count := len(p.active)
+	retries := p.config.MaxRequestRetries
+	if retries < 0 {
+		retries = len(p.active)
+	}
 	err = NotConnectedError
-	for time.Now().Before(deadline) && 0 < retry_count {
+	for time.Now().Before(deadline) {
 		if c := p.getNextActive(); c != nil {
 			rep, err = c.ReqChunks(bytes, timeout)
 			if canFailover(err) {
-				// try next connected server
-				retry_count--
-				continue
+				if 0 < retries {
+					// try next connected server
+					retries--
+					continue
+				} else {
+					break
+				}
 			}
 			return rep, err
 		}
@@ -138,22 +155,30 @@ func (p *Pool) Cast(data []byte) error {
 
 // Make asynchronous request to the server.
 func (p *Pool) CastChunks(data [][]byte) error {
-	active_count := len(p.active)
-	if active_count == 0 {
-		return NotConnectedError
+	retries := p.config.MaxCastRetries
+	if retries < 0 {
+		retries = len(p.active)
 	}
-	var err error
-	for i := 0; i < active_count; i++ {
+	var lastError error
+	for {
 		if c := p.getNextActive(); c != nil {
-			err = c.CastChunks(data)
+			err := c.CastChunks(data)
+			if err == nil {
+				return nil
+			}
 			if canFailover(err) {
-				// try next connected server
-				continue
+				if 0 < retries {
+					// try next connected server
+					retries--
+					lastError = err
+					continue
+				}
 			}
 			return err
 		}
+		break
 	}
-	return err // return last error
+	return lastError
 }
 
 // Return true if request can be retransmitted to another server.
