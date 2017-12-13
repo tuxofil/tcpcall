@@ -37,6 +37,10 @@ type SharderConfig struct {
 	ReconfigPeriod time.Duration
 	// How many connections will be established to each server
 	ConnsPerNode int
+	// Request send max retry count. Negative value means count of
+	// currently established connections to one server,
+	// 0 means no retries will performed at all.
+	MaxRequestRetries int
 }
 
 // Create new Sharder instance with given configuration.
@@ -57,8 +61,9 @@ func NewSharderConfig() SharderConfig {
 		NodesGetter: func() ([]string, error) {
 			return []string{}, nil
 		},
-		ReconfigPeriod: 10 * time.Second,
-		ConnsPerNode:   5,
+		ReconfigPeriod:    10 * time.Second,
+		ConnsPerNode:      5,
+		MaxRequestRetries: -1,
 	}
 }
 
@@ -107,6 +112,7 @@ func (s *Sharder) setNodes(newNodes []string) {
 				peers[i] = n
 			}
 			poolCfg.Peers = peers
+			poolCfg.MaxRequestRetries = s.config.MaxRequestRetries
 			s.conns[n] = NewPool(poolCfg)
 		}
 	}
