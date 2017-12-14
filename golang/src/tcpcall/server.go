@@ -103,6 +103,9 @@ type ServerConf struct {
 	// Asynchronous request (cast) processing function.
 	// Each request will be processed in parallel with others.
 	CastCallback func([]byte)
+	// Called with encoded network packet when there are no workers
+	// left to process the packet.
+	OnDrop func([]byte)
 	// Duration for suspend signals
 	SuspendDuration time.Duration
 	// Enable debug logging or not
@@ -290,6 +293,9 @@ func (h *ServerConn) onRecv(packet []byte) {
 	if h.server.config.Concurrency < h.workers {
 		// max workers count reached
 		h.server.hit(SC_CONCURRENCY_OVERFLOWS)
+		if f := h.server.config.OnDrop; f != nil {
+			f(packet)
+		}
 		if err := h.suspend(h.server.config.SuspendDuration); err != nil {
 			h.log("suspend send: %v", err)
 			h.close()
