@@ -18,6 +18,23 @@ import (
 	"time"
 )
 
+// Sharder counter indices.
+// See Sharder.counters field and Sharder.Counters()
+// method description for details.
+const (
+	// How many requests were made
+	SHC_REQUESTS = iota
+	// How many successfull reconfigs were made
+	SHC_RECONFIGS
+	// How many times reconfiguration failed
+	SHC_RECONFIG_FAILS
+	// How many connection pools were created
+	SHC_POOLS_CREATED
+	// How many connection pools were closed
+	SHC_POOLS_CLOSED
+	SHC_COUNT // special value - count of all counters
+)
+
 type Sharder struct {
 	// Configuration used to create Sharder instance
 	config SharderConf
@@ -27,6 +44,9 @@ type Sharder struct {
 	conns map[string]*Pool
 	// Controls access to the map of connection pools
 	mu *sync.RWMutex
+	// Counters array
+	counters   []int
+	countersMu sync.Locker
 }
 
 // Sharder configuration
@@ -46,10 +66,12 @@ type SharderConf struct {
 // Create new Sharder instance with given configuration.
 func NewSharder(config SharderConf) *Sharder {
 	sharder := &Sharder{
-		config: config,
-		nodes:  []string{},
-		conns:  map[string]*Pool{},
-		mu:     &sync.RWMutex{},
+		config:     config,
+		nodes:      []string{},
+		conns:      map[string]*Pool{},
+		mu:         &sync.RWMutex{},
+		counters:   make([]int, SHC_COUNT),
+		countersMu: &sync.Mutex{},
 	}
 	go sharder.reconfigLoop()
 	return sharder
@@ -70,6 +92,7 @@ func NewSharderConf() SharderConf {
 // Send request to one of configured servers. ID will not
 // be sent, but used only to balance request between servers.
 func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err error) {
+	s.hit(SHC_REQUESTS)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	nodesCount := len(s.nodes)
@@ -78,6 +101,15 @@ func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err
 	}
 	i := shard(id, nodesCount)
 	return s.conns[s.nodes[i]].Req(body, timeout)
+}
+
+// Return a snapshot of all internal counters.
+func (s *Sharder) Counters() []int {
+	res := make([]int, SHC_COUNT)
+	s.countersMu.Lock()
+	copy(res, s.counters)
+	s.countersMu.Unlock()
+	return res
 }
 
 // Sharding function.
@@ -92,8 +124,10 @@ func (s *Sharder) reconfigLoop() {
 	for {
 		if nodes, err := s.config.NodesGetter(); err == nil {
 			s.setNodes(nodes)
+			s.counters[SHC_RECONFIGS]++
 			time.Sleep(s.config.ReconfigPeriod)
 		} else {
+			s.counters[SHC_RECONFIG_FAILS]++
 			time.Sleep(s.config.ReconfigPeriod / 10)
 		}
 	}
@@ -114,15 +148,24 @@ func (s *Sharder) setNodes(newNodes []string) {
 			poolCfg.Peers = peers
 			poolCfg.MaxRequestRetries = s.config.MaxRequestRetries
 			s.conns[n] = NewPool(poolCfg)
+			s.counters[SHC_POOLS_CREATED]++
 		}
 	}
 	for k, p := range s.conns {
 		if !inList(k, newNodes) {
 			p.Close()
 			delete(s.conns, k)
+			s.counters[SHC_POOLS_CLOSED]++
 		}
 	}
 	s.nodes = newNodes
+}
+
+// Thread safe counter increment.
+func (s *Sharder) hit(counter int) {
+	s.countersMu.Lock()
+	s.counters[counter]++
+	s.countersMu.Unlock()
 }
 
 // Leave only unique elements from a string array.
