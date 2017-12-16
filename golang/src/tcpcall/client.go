@@ -21,6 +21,46 @@ import (
 	"time"
 )
 
+// Client counter indices.
+// See Client.counters field and Client.Counters()
+// method description for details.
+const (
+	// How many times Req*() methods were called
+	CC_REQUESTS = iota
+	// How many times requests failed due to connection
+	// concurrency overrun
+	CC_OVERLOADS
+	// How many times requests were not sent due to network errors
+	CC_REQUEST_SEND_FAILS
+	// How many valid replies were received for
+	// sent requests.
+	CC_REPLIES
+	// How many times requests were timeouted waiting
+	// for reply
+	CC_TIMEOUTS
+	// How many times Cast*() methods were called
+	CC_CASTS
+	// How many times casts were not sent due to network errors
+	CC_CAST_SEND_FAILS
+	// How many times client was connected to the server
+	CC_CONNECTS
+	// How many times client was disconnected from the server
+	CC_DISCONNECTS
+	// Count of invalid packets received
+	CC_BAD_PACKETS
+	// Count of reply packets received
+	CC_REPLY_PACKETS
+	// Count of reply packets with error reason received
+	CC_ERROR_PACKETS
+	// Count of suspend packets received
+	CC_SUSPEND_PACKETS
+	// Count of resume packets received
+	CC_RESUME_PACKETS
+	// Count of uplink cast packets received
+	CC_UCAST_PACKETS
+	CC_COUNT // special value - count of all counters
+)
+
 type RRegistry map[uint32]*RREntry
 
 type RREntry struct {
@@ -48,6 +88,9 @@ type Client struct {
 	closeChan chan bool
 	// set to truth on client termination
 	closed bool
+	// Counters array
+	counters   []int
+	countersMu sync.Locker
 }
 
 // Connection configuration.
@@ -115,6 +158,8 @@ func Dial(dst string, conf ClientConf) (c *Client, err error) {
 		registry:   RRegistry{},
 		registryMu: &sync.Mutex{},
 		closeChan:  make(chan bool, 50),
+		counters:   make([]int, CC_COUNT),
+		countersMu: &sync.Mutex{},
 	}
 	if conf.SyncConnect {
 		err = c.connect()
@@ -142,6 +187,7 @@ func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err err
 
 // Make synchronous request to the server.
 func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte, err error) {
+	c.hit(CC_REQUESTS)
 	entry := &RREntry{
 		Deadline: time.Now().Add(timeout),
 		Chan:     make(chan RRReply, 1),
@@ -152,6 +198,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 	c.registryMu.Lock()
 	if c.config.Concurrency <= len(c.registry) {
 		c.registryMu.Unlock()
+		c.hit(CC_OVERLOADS)
 		return nil, OverloadError
 	}
 	// as far as seqnum is uint32, we'll do no checks
@@ -163,6 +210,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 	defer c.popRegistry(req.SeqNum)
 	// send through the network
 	if err := c.socket.Send(encoded); err != nil {
+		c.hit(CC_REQUEST_SEND_FAILS)
 		if err == MsgConnNotConnectedError {
 			return nil, NotConnectedError
 		}
@@ -172,11 +220,13 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte,
 	// wait for the response
 	select {
 	case reply := <-entry.Chan:
+		c.hit(CC_REPLIES)
 		if reply.Error == nil {
 			return bytes.Join(reply.Reply, []byte{}), nil
 		}
 		return nil, RemoteCrashedError
 	case <-time.After(entry.Deadline.Sub(time.Now())):
+		c.hit(CC_TIMEOUTS)
 		return nil, TimeoutError
 	}
 }
@@ -188,8 +238,10 @@ func (c *Client) Cast(data []byte) error {
 
 // Make asynchronous request to the server.
 func (c *Client) CastChunks(data [][]byte) error {
+	c.hit(CC_CASTS)
 	encoded := proto.NewCast(data).Encode()
 	if err := c.socket.Send(encoded); err != nil {
+		c.hit(CC_CAST_SEND_FAILS)
 		return err
 	}
 	c.log("cast sent")
@@ -204,11 +256,28 @@ func (c *Client) GetQueuedRequests() int {
 	return len(c.registry)
 }
 
+// Return a snapshot of all internal counters.
+func (c *Client) Counters() []int {
+	res := make([]int, CC_COUNT)
+	c.countersMu.Lock()
+	copy(res, c.counters)
+	c.countersMu.Unlock()
+	return res
+}
+
+// Thread safe counter increment.
+func (c *Client) hit(counter int) {
+	c.countersMu.Lock()
+	c.counters[counter]++
+	c.countersMu.Unlock()
+}
+
 // Connect (or reconnect) to the server.
 func (c *Client) connect() error {
 	c.disconnect()
 	conn, err := net.Dial("tcp", c.peer)
 	if err == nil {
+		c.counters[CC_CONNECTS]++
 		c.log("connected")
 		msgConn, err := NewMsgConn(conn, c.config.MinFlushPeriod,
 			c.config.WriteBufferSize,
@@ -251,6 +320,7 @@ func (c *Client) disconnect() {
 	c.registry = RRegistry{}
 	c.registryMu.Unlock()
 	c.log("disconnected")
+	c.counters[CC_DISCONNECTS]++
 }
 
 // Goroutine.
@@ -293,30 +363,36 @@ func (c *Client) handlePacket(packet []byte) {
 	if err != nil {
 		// close connection on bad packet receive
 		c.log("decode failed: %s", err)
+		c.counters[CC_BAD_PACKETS]++
 		c.disconnect()
 		return
 	}
 	switch ptype {
 	case proto.REPLY:
+		c.counters[CC_REPLY_PACKETS]++
 		p := payload.(*proto.PacketReply)
 		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{p.Reply, nil}
 		}
 	case proto.ERROR:
+		c.counters[CC_ERROR_PACKETS]++
 		p := payload.(*proto.PacketError)
 		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{nil, p.Reason}
 		}
 	case proto.FLOW_CONTROL_SUSPEND:
+		c.counters[CC_SUSPEND_PACKETS]++
 		if c.config.SuspendListener != nil {
 			p := payload.(*proto.PacketFlowControlSuspend)
 			c.config.SuspendListener <- SuspendEvent{c, p.Duration}
 		}
 	case proto.FLOW_CONTROL_RESUME:
+		c.counters[CC_RESUME_PACKETS]++
 		if c.config.ResumeListener != nil {
 			c.config.ResumeListener <- ResumeEvent{c}
 		}
 	case proto.UPLINK_CAST:
+		c.counters[CC_UCAST_PACKETS]++
 		if c.config.UplinkCastListener != nil {
 			p := payload.(*proto.PacketUplinkCast)
 			flat := bytes.Join(p.Data, []byte{})
