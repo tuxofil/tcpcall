@@ -112,6 +112,21 @@ type ServerConf struct {
 	Trace bool
 }
 
+// Server instance information returned by Info() method.
+// Added mostly for debugging.
+type ServerInfo struct {
+	// Configuration used to create Server instance
+	Config ServerConf
+	// Bind address and port number actually used
+	BindAddr string
+	// Truth means server is terminating (or terminated)
+	StopFlag bool
+	// Count of established connections from clients
+	Connections int
+	// Counters array
+	Counters []int
+}
+
 // Connection handler state
 type ServerConn struct {
 	// IP address and TCP port number of the other
@@ -275,6 +290,17 @@ func (s *Server) Counters() []int {
 	defer s.countersMu.Unlock()
 	copy(res, s.counters)
 	return res
+}
+
+// Return Server's info and stats.
+func (s *Server) Info() ServerInfo {
+	return ServerInfo{
+		Config:      s.config,
+		BindAddr:    s.bindAddr,
+		StopFlag:    s.stopFlag,
+		Connections: s.GetConnections(),
+		Counters:    s.Counters(),
+	}
 }
 
 // Callback for message-oriented socket.

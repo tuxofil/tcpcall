@@ -63,6 +63,19 @@ type SharderConf struct {
 	MaxRequestRetries int
 }
 
+// Sharder instance information returned by Info() method.
+// Added mostly for debugging.
+type SharderInfo struct {
+	// Configuration used to create Sharder instance
+	Config SharderConf
+	// List of nodes actually used
+	Nodes []string
+	// Pools info and stats
+	Pools []PoolInfo
+	// Counters array
+	Counters []int
+}
+
 // Create new Sharder instance with given configuration.
 func NewSharder(config SharderConf) *Sharder {
 	sharder := &Sharder{
@@ -110,6 +123,21 @@ func (s *Sharder) Counters() []int {
 	copy(res, s.counters)
 	s.countersMu.Unlock()
 	return res
+}
+
+// Return Sharder's info and stats.
+func (s *Sharder) Info() SharderInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	info := SharderInfo{
+		Config: s.config,
+		Nodes:  s.nodes,
+		Pools:  []PoolInfo{},
+	}
+	for _, v := range s.conns {
+		info.Pools = append(info.Pools, v.Info())
+	}
+	return info
 }
 
 // Sharding function.

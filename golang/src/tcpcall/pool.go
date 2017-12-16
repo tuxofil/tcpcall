@@ -120,6 +120,31 @@ type PoolConf struct {
 	ClientTrace bool
 }
 
+// Pool instance information returned by Info() method.
+// Added mostly for debugging.
+type PoolInfo struct {
+	// Configuration used to create Pool instance
+	Config PoolConf
+	// Count of all clients to all configured servers
+	ClientsCount int
+	// Count of clients known to be connected
+	ActiveCount int
+	// Info and stats of all clients
+	ClientStats []ClientInfo
+	// Pointer used for Round-Robin balancing
+	BalancerPointer int
+	// Set to truth when pool is about terminating
+	StopFlag bool
+	// Count of unhandled client state change signals
+	StateEventLen int
+	// Count of unhandled client suspend signals
+	SuspendEventLen int
+	// Count of unhandled client resume signals
+	ResumeEventLen int
+	// Counters array
+	Counters []int
+}
+
 // Create new connection pool.
 func NewPool(conf PoolConf) *Pool {
 	p := Pool{
@@ -526,4 +551,29 @@ func (p *Pool) Counters() []int {
 	copy(res, p.counters)
 	p.countersMu.Unlock()
 	return res
+}
+
+// Return pool's info and stats.
+func (p *Pool) Info() PoolInfo {
+	info := PoolInfo{
+		Config:          p.config,
+		ClientStats:     []ClientInfo{},
+		BalancerPointer: p.balancerPointer,
+		StopFlag:        p.stopFlag,
+		StateEventLen:   len(p.stateEvents),
+		SuspendEventLen: len(p.suspendEvents),
+		ResumeEventLen:  len(p.resumeEvents),
+		Counters:        p.Counters(),
+	}
+	p.lock.Lock()
+	for _, c := range p.clients {
+		cinfo := c.Info()
+		info.ClientsCount++
+		if cinfo.Connected {
+			info.ActiveCount++
+		}
+		info.ClientStats = append(info.ClientStats, cinfo)
+	}
+	p.lock.Unlock()
+	return info
 }

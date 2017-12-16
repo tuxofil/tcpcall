@@ -120,6 +120,19 @@ type ClientConf struct {
 	Trace bool
 }
 
+// Client instance information returned by Info() method.
+// Added mostly for debugging.
+type ClientInfo struct {
+	// Configuration used to create Client instance
+	Config ClientConf
+	// Remote side address and port number
+	Peer string
+	// Truth if client is currently connected to the server
+	Connected bool
+	// Counters array
+	Counters []int
+}
+
 // Connection state event.
 type StateEvent struct {
 	// Pointer to the client connection state.
@@ -254,6 +267,16 @@ func (c *Client) GetQueuedRequests() int {
 	c.registryMu.Lock()
 	defer c.registryMu.Unlock()
 	return len(c.registry)
+}
+
+// Return client's info and stats.
+func (c *Client) Info() ClientInfo {
+	return ClientInfo{
+		Config:    c.config,
+		Peer:      c.peer,
+		Connected: c.socket != nil && !c.socket.Closed(),
+		Counters:  c.Counters(),
+	}
 }
 
 // Return a snapshot of all internal counters.
