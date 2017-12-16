@@ -20,7 +20,7 @@ import (
 
 type Sharder struct {
 	// Configuration used to create Sharder instance
-	config SharderConfig
+	config SharderConf
 	// List of servers actually used
 	nodes []string
 	// Map server hostname to connection pool
@@ -30,7 +30,7 @@ type Sharder struct {
 }
 
 // Sharder configuration
-type SharderConfig struct {
+type SharderConf struct {
 	// Callback function used to get list of servers
 	NodesGetter func() ([]string, error)
 	// How often NodesGetter will be called
@@ -44,7 +44,7 @@ type SharderConfig struct {
 }
 
 // Create new Sharder instance with given configuration.
-func NewSharder(config SharderConfig) *Sharder {
+func NewSharder(config SharderConf) *Sharder {
 	sharder := &Sharder{
 		config: config,
 		nodes:  []string{},
@@ -56,8 +56,8 @@ func NewSharder(config SharderConfig) *Sharder {
 }
 
 // Create default configuration for Sharder.
-func NewSharderConfig() SharderConfig {
-	return SharderConfig{
+func NewSharderConf() SharderConf {
+	return SharderConf{
 		NodesGetter: func() ([]string, error) {
 			return []string{}, nil
 		},
