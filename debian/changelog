@@ -1,3 +1,20 @@
+tcpcall (2.3.0) unstable; urgency=low
+
+  * golang: add *.Info() methods for better diagnostics
+  * golang: add OnDrop callback for Server
+  * golang: extend Server with internal counters
+  * golang: extend Sharder with internal counters
+  * golang: extend Pool with internal counters
+  * golang: extend Client with internal counters
+  * golang: refactor SharderConfig to SharderConf
+  * golang: extend Sharder cfg with MaxRequestRetries
+  * golang: extend Pool cfg with MaxRequestRetries, MaxCastRetries
+  * golang: comment Server
+  * golang: comment Pool
+  * golang: comment Sharder
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Sat, 16 Dec 2017 23:36:20 +0200
+
 tcpcall (2.2.1) unstable; urgency=low
 
   * golang: do not loose microseconds while decoding deadline
