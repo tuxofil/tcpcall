@@ -60,6 +60,10 @@ const (
 	SC_CASTS
 	// unknown request received (and left without processing)
 	SC_UNKNOWN
+	// we're about sending uplink cast packet to the client
+	SC_UPLINK_CAST_REQUESTED
+	// uplink cast packet not sent due to error
+	SC_UPLINK_CAST_ERRORS
 	SC_COUNT // special value - count of all counters
 )
 
@@ -203,6 +207,15 @@ func (s *Server) Resume() {
 	for h, _ := range s.connections {
 		h.resume()
 	}
+}
+
+// Send uplink cast packet to all connected clients.
+func (s *Server) UplinkCast(data []byte) {
+	s.lock.Lock()
+	for conn := range s.connections {
+		conn.uplinkCast(data)
+	}
+	s.lock.Unlock()
 }
 
 // Goroutine.
@@ -375,6 +388,17 @@ func (h *ServerConn) resume() error {
 	packet := proto.PacketFlowControlResume{}
 	if err := h.writePacket(packet); err != nil {
 		h.server.hit(SC_RESUME_REQUEST_ERRORS)
+		return err
+	}
+	return nil
+}
+
+// Send uplink cast packet to client side.
+func (h *ServerConn) uplinkCast(data []byte) error {
+	h.server.hit(SC_UPLINK_CAST_REQUESTED)
+	packet := proto.PacketUplinkCast{[][]byte{data}}
+	if err := h.writePacket(packet); err != nil {
+		h.server.hit(SC_UPLINK_CAST_ERRORS)
 		return err
 	}
 	return nil
