@@ -79,12 +79,12 @@ type Server struct {
 	// List of established client connections.
 	connections map[*ServerConn]bool
 	// Controls access to client connections map.
-	lock *sync.Mutex
+	lock sync.Mutex
 	// Set to truth when server is about to terminate.
 	stopFlag bool
 	// Counters array
 	counters   []int
-	countersMu sync.Locker
+	countersMu sync.RWMutex
 }
 
 // Server configuration
@@ -143,7 +143,7 @@ type ServerConn struct {
 	// request received from the client).
 	workers int
 	// Controls access to conn object.
-	lock sync.Locker
+	lock sync.Mutex
 	// Link to the Server instance this conection
 	// is originated from.
 	server *Server
@@ -159,9 +159,9 @@ func Listen(conf ServerConf) (*Server, error) {
 			config:      conf,
 			socket:      socket,
 			connections: make(map[*ServerConn]bool, conf.MaxConnections),
-			lock:        &sync.Mutex{},
+			lock:        sync.Mutex{},
 			counters:    make([]int, SC_COUNT),
-			countersMu:  &sync.Mutex{},
+			countersMu:  sync.RWMutex{},
 		}
 		go server.acceptLoop()
 		return server, nil
@@ -185,28 +185,28 @@ func NewServerConf() ServerConf {
 func (s *Server) Stop() {
 	s.stopFlag = true
 	s.lock.Lock()
-	defer s.lock.Unlock()
 	for h, _ := range s.connections {
 		go h.close()
 	}
+	s.lock.Unlock()
 }
 
 // Send 'suspend' signal to all connected clients.
 func (s *Server) Suspend(duration time.Duration) {
 	s.lock.Lock()
-	defer s.lock.Unlock()
-	for h, _ := range s.connections {
-		h.suspend(duration)
+	for conn := range s.connections {
+		conn.suspend(duration)
 	}
+	s.lock.Unlock()
 }
 
 // Send 'resume' signal to all connected clients.
 func (s *Server) Resume() {
 	s.lock.Lock()
-	defer s.lock.Unlock()
-	for h, _ := range s.connections {
-		h.resume()
+	for conn := range s.connections {
+		conn.resume()
 	}
+	s.lock.Unlock()
 }
 
 // Send uplink cast packet to all connected clients.
@@ -244,7 +244,7 @@ func (s *Server) acceptLoop() {
 		h := &ServerConn{
 			peer:   socket.RemoteAddr().String(),
 			server: s,
-			lock:   &sync.Mutex{},
+			lock:   sync.Mutex{},
 		}
 		msgConn, err := NewMsgConn(socket,
 			s.config.MinFlushPeriod,
@@ -266,18 +266,19 @@ func (s *Server) acceptLoop() {
 // Return count of active client connections opened.
 func (s *Server) GetConnections() int {
 	s.lock.Lock()
-	defer s.lock.Unlock()
-	return len(s.connections)
+	res := len(s.connections)
+	s.lock.Unlock()
+	return res
 }
 
 // Return total count of running requests.
 func (s *Server) GetWorkers() int {
 	s.lock.Lock()
-	defer s.lock.Unlock()
 	workers := 0
-	for h, _ := range s.connections {
-		workers += h.workers
+	for conn := range s.connections {
+		workers += conn.workers
 	}
+	s.lock.Unlock()
 	return workers
 }
 
@@ -299,9 +300,9 @@ func (s *Server) hit(counter int) {
 // Return snapshot of server internal counters.
 func (s *Server) Counters() []int {
 	res := make([]int, SC_COUNT)
-	s.countersMu.Lock()
-	defer s.countersMu.Unlock()
+	s.countersMu.RLock()
 	copy(res, s.counters)
+	s.countersMu.RUnlock()
 	return res
 }
 

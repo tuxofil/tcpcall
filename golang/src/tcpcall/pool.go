@@ -67,7 +67,7 @@ type Pool struct {
 	// Pointer used for Round-Robin balancing
 	balancerPointer int
 	// Controls access to client lists above
-	lock sync.Locker
+	lock sync.RWMutex
 	// Set to truth when pool is about terminating
 	stopFlag bool
 	// Channel used to receive state change events from
@@ -81,7 +81,7 @@ type Pool struct {
 	resumeEvents chan ResumeEvent
 	// Counters array
 	counters   []int
-	countersMu sync.Locker
+	countersMu sync.RWMutex
 }
 
 // Connection pool configuration.
@@ -151,12 +151,12 @@ func NewPool(conf PoolConf) *Pool {
 		config:        conf,
 		clients:       make([]*Client, 0),
 		active:        make([]*Client, 0),
-		lock:          &sync.Mutex{},
+		lock:          sync.RWMutex{},
 		stateEvents:   make(chan StateEvent, 10),
 		suspendEvents: make(chan SuspendEvent, 10),
 		resumeEvents:  make(chan ResumeEvent, 10),
 		counters:      make([]int, PC_COUNT),
-		countersMu:    &sync.Mutex{},
+		countersMu:    sync.RWMutex{},
 	}
 	go startEventListenerDaemon(&p)
 	go startConfiguratorDaemon(&p)
@@ -285,7 +285,6 @@ func canFailover(err error) bool {
 // Select next worker from the list of connected workers.
 func (p *Pool) getNextActive() (client *Client) {
 	p.lock.Lock()
-	defer p.lock.Unlock()
 	if len(p.active) <= p.balancerPointer {
 		p.balancerPointer = 0
 	}
@@ -293,63 +292,60 @@ func (p *Pool) getNextActive() (client *Client) {
 		client = p.active[p.balancerPointer]
 	}
 	p.balancerPointer++
+	p.lock.Unlock()
 	return client
 }
 
 // Destroy the pool.
 func (p *Pool) Close() {
 	p.lock.Lock()
-	defer p.lock.Unlock()
 	if p.clients == nil || len(p.clients) == 0 {
 		for _, c := range p.clients {
 			c.Close()
 		}
 	}
+	p.lock.Unlock()
 	p.stopFlag = true
 }
 
 // Return address list of all connections in the pool.
 func (p *Pool) GetWorkerPeers() []string {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.lock.RLock()
 	res := make([]string, len(p.clients))
 	for i := 0; i < len(p.clients); i++ {
 		res[i] = p.clients[i].peer
 	}
+	p.lock.RUnlock()
 	return res
 }
 
 // Return count of all workers.
 func (p *Pool) GetWorkersCount() int {
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	return len(p.clients)
 }
 
 // Return count of active workers.
 func (p *Pool) GetActiveWorkersCount() int {
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	return len(p.active)
 }
 
 // Return count of requests being processed by all workers.
 func (p *Pool) GetQueuedRequests() (count int) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.lock.RLock()
 	for _, w := range p.clients {
 		count += w.GetQueuedRequests()
 	}
+	p.lock.RUnlock()
 	return count
 }
 
 // Return count of requests being processed by active workers.
 func (p *Pool) GetActiveQueuedRequests() (count int) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	p.lock.RLock()
 	for _, w := range p.active {
 		count += w.GetQueuedRequests()
 	}
+	p.lock.RUnlock()
 	return count
 }
 
@@ -365,7 +361,6 @@ func (p *Pool) getPeers() []string {
 // Process all events received from connection handlers.
 func startEventListenerDaemon(p *Pool) {
 	p.log("daemon started")
-	defer p.log("daemon terminated")
 	for !p.stopFlag {
 		select {
 		case state_event := <-p.stateEvents:
@@ -390,18 +385,19 @@ func startEventListenerDaemon(p *Pool) {
 		case <-time.After(time.Millisecond * 200):
 		}
 	}
+	p.log("daemon terminated")
 }
 
 // Goroutine.
 // Reconfigures the pool on the fly.
 func startConfiguratorDaemon(p *Pool) {
 	p.log("reconfigurator daemon started")
-	defer p.log("reconfigurator daemon terminated")
 	for !p.stopFlag {
 		p.applyPeers(p.getPeers())
 		p.counters[PC_RECONFIG]++
 		time.Sleep(p.config.ReconfigPeriod)
 	}
+	p.log("reconfigurator daemon terminated")
 }
 
 // Apply new list of target peers.
@@ -441,12 +437,12 @@ func (p *Pool) applyPeers(peers []string) {
 // Remove client connection from the pool.
 func (p *Pool) remWorker(index int) {
 	p.lock.Lock()
-	defer p.lock.Unlock()
 	worker := p.clients[index]
 	p.log("removing worker for %s", worker.peer)
 	remFromArray(index, &p.clients)
 	p.unpublishWorker(worker)
 	worker.Close()
+	p.lock.Unlock()
 	p.counters[PC_WORKER_REMOVED]++
 }
 
@@ -465,10 +461,10 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.SyncConnect = false
 	cfg.Trace = p.config.ClientTrace
 	worker, _ := Dial(peer, cfg)
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	p.log("adding worker for %s", peer)
+	p.lock.Lock()
 	addToArray(index, &p.clients, worker)
+	p.lock.Unlock()
 	p.counters[PC_WORKER_ADDED]++
 }
 
@@ -547,9 +543,9 @@ func (p *Pool) hit(counter int) {
 // Return a snapshot of all internal counters.
 func (p *Pool) Counters() []int {
 	res := make([]int, PC_COUNT)
-	p.countersMu.Lock()
+	p.countersMu.RLock()
 	copy(res, p.counters)
-	p.countersMu.Unlock()
+	p.countersMu.RUnlock()
 	return res
 }
 
@@ -565,7 +561,7 @@ func (p *Pool) Info() PoolInfo {
 		ResumeEventLen:  len(p.resumeEvents),
 		Counters:        p.Counters(),
 	}
-	p.lock.Lock()
+	p.lock.RLock()
 	for _, c := range p.clients {
 		cinfo := c.Info()
 		info.ClientsCount++
@@ -574,6 +570,6 @@ func (p *Pool) Info() PoolInfo {
 		}
 		info.ClientStats = append(info.ClientStats, cinfo)
 	}
-	p.lock.Unlock()
+	p.lock.RUnlock()
 	return info
 }

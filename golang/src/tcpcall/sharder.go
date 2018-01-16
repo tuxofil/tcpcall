@@ -43,10 +43,10 @@ type Sharder struct {
 	// Map server hostname to connection pool
 	conns map[string]*Pool
 	// Controls access to the map of connection pools
-	mu *sync.RWMutex
+	mu sync.RWMutex
 	// Counters array
 	counters   []int
-	countersMu sync.Locker
+	countersMu sync.RWMutex
 }
 
 // Sharder configuration
@@ -82,9 +82,9 @@ func NewSharder(config SharderConf) *Sharder {
 		config:     config,
 		nodes:      []string{},
 		conns:      map[string]*Pool{},
-		mu:         &sync.RWMutex{},
+		mu:         sync.RWMutex{},
 		counters:   make([]int, SHC_COUNT),
-		countersMu: &sync.Mutex{},
+		countersMu: sync.RWMutex{},
 	}
 	go sharder.reconfigLoop()
 	return sharder
@@ -119,16 +119,15 @@ func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err
 // Return a snapshot of all internal counters.
 func (s *Sharder) Counters() []int {
 	res := make([]int, SHC_COUNT)
-	s.countersMu.Lock()
+	s.countersMu.RLock()
 	copy(res, s.counters)
-	s.countersMu.Unlock()
+	s.countersMu.RUnlock()
 	return res
 }
 
 // Return Sharder's info and stats.
 func (s *Sharder) Info() SharderInfo {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	info := SharderInfo{
 		Config: s.config,
 		Nodes:  s.nodes,
@@ -137,6 +136,7 @@ func (s *Sharder) Info() SharderInfo {
 	for _, v := range s.conns {
 		info.Pools = append(info.Pools, v.Info())
 	}
+	s.mu.RUnlock()
 	return info
 }
 
@@ -165,7 +165,6 @@ func (s *Sharder) reconfigLoop() {
 func (s *Sharder) setNodes(newNodes []string) {
 	newNodes = uniq(newNodes)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, n := range newNodes {
 		if _, ok := s.conns[n]; !ok {
 			poolCfg := NewPoolConf()
@@ -187,6 +186,7 @@ func (s *Sharder) setNodes(newNodes []string) {
 		}
 	}
 	s.nodes = newNodes
+	s.mu.Unlock()
 }
 
 // Thread safe counter increment.

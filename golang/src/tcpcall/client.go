@@ -81,7 +81,7 @@ type Client struct {
 	config ClientConf
 	// list of issued pending requests
 	registry   RRegistry
-	registryMu sync.Locker
+	registryMu sync.Mutex
 	// message oriented network socket
 	socket *MsgConn
 	// channel for disconnection events
@@ -90,7 +90,7 @@ type Client struct {
 	closed bool
 	// Counters array
 	counters   []int
-	countersMu sync.Locker
+	countersMu sync.RWMutex
 }
 
 // Connection configuration.
@@ -169,10 +169,10 @@ func Dial(dst string, conf ClientConf) (c *Client, err error) {
 		peer:       dst,
 		config:     conf,
 		registry:   RRegistry{},
-		registryMu: &sync.Mutex{},
+		registryMu: sync.Mutex{},
 		closeChan:  make(chan bool, 50),
 		counters:   make([]int, CC_COUNT),
-		countersMu: &sync.Mutex{},
+		countersMu: sync.RWMutex{},
 	}
 	if conf.SyncConnect {
 		err = c.connect()
@@ -282,9 +282,9 @@ func (c *Client) Info() ClientInfo {
 // Return a snapshot of all internal counters.
 func (c *Client) Counters() []int {
 	res := make([]int, CC_COUNT)
-	c.countersMu.Lock()
+	c.countersMu.RLock()
 	copy(res, c.counters)
-	c.countersMu.Unlock()
+	c.countersMu.RUnlock()
 	return res
 }
 
