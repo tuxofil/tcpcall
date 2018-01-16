@@ -34,7 +34,7 @@ type MsgConn struct {
 	buffer    *bufio.Writer
 	lastFlush time.Time
 	// socket write mutex
-	socketMu sync.Locker
+	socketMu sync.Mutex
 	// maximum allowed length for incoming packets
 	MaxPacketLen int
 	// Minimum time between write buffer flushes
@@ -56,7 +56,7 @@ func NewMsgConn(socket net.Conn, minFlushPeriod time.Duration,
 	conn := &MsgConn{
 		socket:         socket,
 		buffer:         bufio.NewWriterSize(socket, writeBufferSize),
-		socketMu:       &sync.Mutex{},
+		socketMu:       sync.Mutex{},
 		handler:        handler,
 		onDisconnect:   onClose,
 		minFlushPeriod: minFlushPeriod,
