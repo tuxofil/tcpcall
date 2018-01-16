@@ -164,8 +164,15 @@ type UplinkCastEvent struct {
 }
 
 // Connect to server side.
-func Dial(dst string, conf ClientConf) (c *Client, err error) {
-	c = &Client{
+// Return non nil error only when ClientConf.SyncConnect
+// option is set to truth and initial connection failed.
+// Regardless error value, returned Client instance is valid
+// for further operation. It will connect to the server
+// eventually (of course, if server will became available with time).
+// If you dont want to use created Client instance in case
+// when error != nil, you must call Close() method.
+func Dial(dst string, conf ClientConf) (*Client, error) {
+	c := &Client{
 		peer:       dst,
 		config:     conf,
 		registry:   RRegistry{},
@@ -174,6 +181,7 @@ func Dial(dst string, conf ClientConf) (c *Client, err error) {
 		counters:   make([]int, CC_COUNT),
 		countersMu: sync.RWMutex{},
 	}
+	var err error
 	if conf.SyncConnect {
 		err = c.connect()
 	}
@@ -194,12 +202,12 @@ func NewClientConf() ClientConf {
 }
 
 // Make synchronous request to the server.
-func (c *Client) Req(payload []byte, timeout time.Duration) (rep []byte, err error) {
+func (c *Client) Req(payload []byte, timeout time.Duration) ([]byte, error) {
 	return c.ReqChunks([][]byte{payload}, timeout)
 }
 
 // Make synchronous request to the server.
-func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) (rep []byte, err error) {
+func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, error) {
 	c.hit(CC_REQUESTS)
 	entry := &RREntry{
 		Deadline: time.Now().Add(timeout),
