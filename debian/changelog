@@ -1,3 +1,11 @@
+tcpcall (2.4.1) unstable; urgency=low
+
+  * golang: style fixes for Client; extend Dial() docs
+  * golang: use mutex properly in MsgConn
+  * golang: use mutexes properly, use less defers
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Thu, 15 Feb 2018 17:04:04 +0200
+
 tcpcall (2.4.0) unstable; urgency=low
 
   * golang: implement Server.UplinkCast() API call
