@@ -47,6 +47,8 @@ type Sharder struct {
 	// Counters array
 	counters   []int
 	countersMu sync.RWMutex
+	// sharding counters
+	sCounters []int
 }
 
 // Sharder configuration
@@ -113,6 +115,7 @@ func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err
 		return nil, errors.New("not configured")
 	}
 	i := shard(id, nodesCount)
+	s.sCounters[i]++
 	return s.conns[s.nodes[i]].Req(body, timeout)
 }
 
@@ -122,6 +125,15 @@ func (s *Sharder) Counters() []int {
 	s.countersMu.RLock()
 	copy(res, s.counters)
 	s.countersMu.RUnlock()
+	return res
+}
+
+// Return a snapshot of all sharding counters.
+func (s *Sharder) ShardingCounters() []int {
+	s.mu.RLock()
+	res := make([]int, len(s.sCounters))
+	copy(res, s.sCounters)
+	s.mu.RUnlock()
 	return res
 }
 
@@ -186,6 +198,7 @@ func (s *Sharder) setNodes(newNodes []string) {
 		}
 	}
 	s.nodes = newNodes
+	s.sCounters = make([]int, len(newNodes))
 	s.mu.Unlock()
 }
 
