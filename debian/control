@@ -4,7 +4,7 @@ Priority: extra
 Maintainer: Aleksey Morarash <aleksey.morarash@gmail.com>
 Build-Depends: debhelper, erlang-base, erlang-dev, erlang-tools, erlang-edoc,
  erlang-eunit, golang
-Standards-Version: 3.9.3
+Standards-Version: 4.1.4
 Homepage: https://github.com/tuxofil/erlang-tcpcall
 Vcs-Browser: https://github.com/tuxofil/erlang-tcpcall
 Vcs-Git: https://github.com/tuxofil/erlang-tcpcall.git
