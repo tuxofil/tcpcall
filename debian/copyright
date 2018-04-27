@@ -2,7 +2,7 @@ Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: tcpcall
 
 Files: *
-Copyright: 2014 Aleksey Morarash <aleksey.morarash@gmail.com>
+Copyright: 2018 Aleksey Morarash <aleksey.morarash@gmail.com>
 License: BSD
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions are met:
