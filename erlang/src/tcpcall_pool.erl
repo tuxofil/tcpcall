@@ -598,10 +598,10 @@ pop_random([_ | _] = List) ->
     _Ignored =
         case get(random_seed) == undefined of
             true ->
-                random:seed(os:timestamp());
+                rand:seed(exs1024);
             false -> ok
         end,
-    Index = random:uniform(length(List)),
+    Index = rand:uniform(length(List)),
     {List1, [Elem | List2]} = lists:split(Index - 1, List),
     {Elem, List1 ++ List2}.
 
