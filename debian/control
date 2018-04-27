@@ -6,8 +6,6 @@ Build-Depends: debhelper, erlang-base, erlang-dev, erlang-tools, erlang-edoc,
  erlang-eunit, golang
 Standards-Version: 4.1.4
 Homepage: https://github.com/tuxofil/erlang-tcpcall
-Vcs-Browser: https://github.com/tuxofil/erlang-tcpcall
-Vcs-Git: https://github.com/tuxofil/erlang-tcpcall.git
 
 Package: erlang-tcpcall
 Architecture: all
