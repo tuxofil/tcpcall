@@ -1,3 +1,13 @@
+tcpcall (2.5.1) unstable; urgency=low
+
+  * Adapt Erlang code for OTP 19.2
+  * Adapt golang lib path to Debian Stretch rules
+  * Fix copyright year
+  * Specs: remove Vcs-Browser and Vcs-Git links
+  * Upgrade Debian Policy version references
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Sat, 28 Apr 2018 12:27:26 +0300
+
 tcpcall (2.5.0) unstable; urgency=low
 
   * Add sharding counters for Sharder
