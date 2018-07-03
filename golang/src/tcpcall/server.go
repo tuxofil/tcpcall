@@ -344,13 +344,13 @@ func (h *ServerConn) onRecv(packet []byte) {
 	}
 	h.incrementWorkers()
 	go func() {
-		defer h.decrementWorkers()
 		// decode packet
 		ptype, data, err := proto.Decode(packet)
 		if err != nil {
 			h.server.hit(SC_PACKET_DECODE_ERRORS)
 			h.log("packet decode failed: %v", err)
 			h.close()
+			h.decrementWorkers()
 			return
 		}
 		h.log("got packet of type %d: %v", ptype, data)
@@ -369,6 +369,7 @@ func (h *ServerConn) onRecv(packet []byte) {
 			// ignore packet
 			h.server.hit(SC_UNKNOWN)
 		}
+		h.decrementWorkers()
 	}()
 }
 

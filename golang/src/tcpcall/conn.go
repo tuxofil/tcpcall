@@ -82,17 +82,18 @@ func (c *MsgConn) Send(msg [][]byte) error {
 		msgLen += len(e)
 	}
 	c.socketMu.Lock()
-	defer c.socketMu.Unlock()
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(msgLen))
 	if _, err := c.buffer.Write(header); err != nil {
 		c.Close()
+		c.socketMu.Unlock()
 		return err
 	}
 	// write chunks one by one
 	for _, e := range msg {
 		if _, err := c.buffer.Write(e); err != nil {
 			c.Close()
+			c.socketMu.Unlock()
 			return err
 		}
 	}
@@ -101,10 +102,12 @@ func (c *MsgConn) Send(msg [][]byte) error {
 		time.Now().After(c.lastFlush.Add(c.minFlushPeriod)) {
 		if err := c.buffer.Flush(); err != nil {
 			c.Close()
+			c.socketMu.Unlock()
 			return err
 		}
 		c.lastFlush = time.Now()
 	}
+	c.socketMu.Unlock()
 	return nil
 }
 

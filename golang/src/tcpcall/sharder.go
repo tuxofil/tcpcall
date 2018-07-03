@@ -109,14 +109,16 @@ func NewSharderConf() SharderConf {
 func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err error) {
 	s.hit(SHC_REQUESTS)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	nodesCount := len(s.nodes)
 	if nodesCount == 0 {
+		s.mu.RUnlock()
 		return nil, errors.New("not configured")
 	}
 	i := shard(id, nodesCount)
 	s.sCounters[i]++
-	return s.conns[s.nodes[i]].Req(body, timeout)
+	reply, err = s.conns[s.nodes[i]].Req(body, timeout)
+	s.mu.RUnlock()
+	return
 }
 
 // Return a snapshot of all internal counters.
