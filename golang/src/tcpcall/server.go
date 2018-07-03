@@ -159,7 +159,6 @@ func Listen(conf ServerConf) (*Server, error) {
 			config:      conf,
 			socket:      socket,
 			connections: make(map[*ServerConn]bool, conf.MaxConnections),
-			lock:        sync.Mutex{},
 			counters:    make([]*int64, SC_COUNT),
 		}
 		for i := 0; i < SC_COUNT; i++ {
@@ -247,7 +246,6 @@ func (s *Server) acceptLoop() {
 		h := &ServerConn{
 			peer:   socket.RemoteAddr().String(),
 			server: s,
-			lock:   sync.Mutex{},
 		}
 		msgConn, err := NewMsgConn(socket,
 			s.config.MinFlushPeriod,

@@ -173,12 +173,11 @@ type UplinkCastEvent struct {
 // when error != nil, you must call Close() method.
 func Dial(dst string, conf ClientConf) (*Client, error) {
 	c := &Client{
-		peer:       dst,
-		config:     conf,
-		registry:   RRegistry{},
-		registryMu: sync.Mutex{},
-		closeChan:  make(chan bool, 50),
-		counters:   make([]*int64, CC_COUNT),
+		peer:      dst,
+		config:    conf,
+		registry:  RRegistry{},
+		closeChan: make(chan bool, 50),
+		counters:  make([]*int64, CC_COUNT),
 	}
 	for i := 0; i < CC_COUNT; i++ {
 		var v int64

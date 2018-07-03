@@ -151,7 +151,6 @@ func NewPool(conf PoolConf) *Pool {
 		config:        conf,
 		clients:       make([]*Client, 0),
 		active:        make([]*Client, 0),
-		lock:          sync.RWMutex{},
 		stateEvents:   make(chan StateEvent, 10),
 		suspendEvents: make(chan SuspendEvent, 10),
 		resumeEvents:  make(chan ResumeEvent, 10),

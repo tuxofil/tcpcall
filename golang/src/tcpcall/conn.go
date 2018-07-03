@@ -56,7 +56,6 @@ func NewMsgConn(socket net.Conn, minFlushPeriod time.Duration,
 	conn := &MsgConn{
 		socket:         socket,
 		buffer:         bufio.NewWriterSize(socket, writeBufferSize),
-		socketMu:       sync.Mutex{},
 		handler:        handler,
 		onDisconnect:   onClose,
 		minFlushPeriod: minFlushPeriod,

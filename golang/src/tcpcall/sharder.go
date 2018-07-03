@@ -84,7 +84,6 @@ func NewSharder(config SharderConf) *Sharder {
 		config:   config,
 		nodes:    []string{},
 		conns:    map[string]*Pool{},
-		mu:       sync.RWMutex{},
 		counters: make([]*int64, SHC_COUNT),
 	}
 	for i := 0; i < SHC_COUNT; i++ {
