@@ -435,8 +435,7 @@ func (h *ServerConn) processRequest(req *proto.PacketRequest) {
 		res = []byte{}
 	}
 	replyPacket := proto.PacketReply{req.SeqNum, [][]byte{res}}
-	err := h.writePacket(replyPacket)
-	if err == nil {
+	if err := h.writePacket(replyPacket); err == nil {
 		h.log("sent reply: %v", replyPacket)
 	} else {
 		h.log("sent reply failed: %v", err)
