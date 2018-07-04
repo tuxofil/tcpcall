@@ -473,12 +473,12 @@ func (c *Client) handlePacket(packet []byte) {
 // Lookup request in the registry and remove it.
 func (c *Client) popRegistry(seqnum uint32) (e *RREntry, ok bool) {
 	c.registryMu.Lock()
-	res, ok := c.registry[seqnum]
+	e, ok = c.registry[seqnum]
 	if ok {
 		delete(c.registry, seqnum)
 	}
 	c.registryMu.Unlock()
-	return res, ok
+	return
 }
 
 // Print message to the stdout if verbose mode is enabled.
