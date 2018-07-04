@@ -143,7 +143,7 @@ func (c *MsgConn) readLoop() {
 // Receive next message from the other side.
 func (c *MsgConn) readPacket() ([]byte, error) {
 	header := pools.GetFreeBuffer(headerLen)
-	if _, err := io.ReadFull(c.socket, header); err != nil {
+	if _, err := io.ReadAtLeast(c.socket, header, headerLen); err != nil {
 		return nil, err
 	}
 	len := int(binary.BigEndian.Uint32(header))
@@ -152,7 +152,7 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 		return nil, MsgTooLongError
 	}
 	buffer := make([]byte, len)
-	if _, err := io.ReadFull(c.socket, buffer); err != nil {
+	if _, err := io.ReadAtLeast(c.socket, buffer, len); err != nil {
 		return nil, err
 	}
 	return buffer[:len], nil
