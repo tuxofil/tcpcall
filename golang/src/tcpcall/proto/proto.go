@@ -67,6 +67,11 @@ var (
 	gSeq *uint32
 )
 
+var (
+	flowResumeByte = [][]byte{[]byte{FLOW_CONTROL_RESUME}}
+	uplinkCastByte = []byte{UPLINK_CAST}
+)
+
 func init() {
 	var v uint32
 	gSeq = &v
@@ -134,13 +139,13 @@ func (p PacketFlowControlSuspend) Encode() [][]byte {
 
 // Encode Resume packet for network.
 func (p PacketFlowControlResume) Encode() [][]byte {
-	return [][]byte{[]byte{FLOW_CONTROL_RESUME}}
+	return flowResumeByte
 }
 
 // Encode Uplink Cast packet for network.
 func (p PacketUplinkCast) Encode() [][]byte {
 	res := make([][]byte, len(p.Data)+1)
-	res[0] = []byte{UPLINK_CAST}
+	res[0] = uplinkCastByte
 	copy(res[1:], p.Data)
 	return res
 }
