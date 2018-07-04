@@ -22,6 +22,9 @@ import (
 	"time"
 )
 
+// Packet header Len
+const headerLen = 4
+
 // Errors
 var (
 	MsgConnNotConnectedError = errors.New("msg conn: not connected")
@@ -157,7 +160,7 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 	select {
 	case header = <-headerChan:
 	default:
-		header = make([]byte, 4)
+		header = make([]byte, headerLen)
 	}
 	if _, err := io.ReadFull(c.socket, header); err != nil {
 		return nil, err
