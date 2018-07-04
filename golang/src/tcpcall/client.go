@@ -431,6 +431,7 @@ func (c *Client) handlePacket(packet []byte) {
 		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{p.Reply, nil}
 		}
+		proto.AppendToReply(p)
 	case proto.ERROR:
 		c.hit(CC_ERROR_PACKETS)
 		p := payload.(*proto.PacketError)

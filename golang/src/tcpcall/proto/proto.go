@@ -68,6 +68,7 @@ var (
 )
 
 var (
+	replyChan      = make(chan *PacketReply, 4000)
 	flowResumeByte = [][]byte{[]byte{FLOW_CONTROL_RESUME}}
 	uplinkCastByte = []byte{UPLINK_CAST}
 )
@@ -176,7 +177,16 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 			return -1, nil, errors.New("bad Reply packet: header too small")
 		}
 		seqnum := binary.BigEndian.Uint32(bytes[1:])
-		return ptype, &PacketReply{seqnum, [][]byte{bytes[5:]}}, nil
+		var pckt *PacketReply
+		select {
+		case pckt = <-replyChan:
+			pckt.SeqNum = seqnum
+			pckt.Reply = make([][]byte, 1)
+			pckt.Reply[0] = bytes[5:]
+		default:
+			pckt = &PacketReply{seqnum, [][]byte{bytes[5:]}}
+		}
+		return ptype, pckt, nil
 	case ERROR:
 		if len(bytes) < 5 {
 			return -1, nil, errors.New("bad Error packet: header too small")
@@ -200,4 +210,11 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 // Generate sequence number (aka packet ID).
 func getSeqNum() uint32 {
 	return atomic.AddUint32(gSeq, 1) - 1
+}
+
+func AppendToReply(r *PacketReply) {
+	select {
+	case replyChan <- r:
+	default:
+	}
 }
