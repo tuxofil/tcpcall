@@ -82,12 +82,25 @@ func (c *MsgConn) Send(msg [][]byte) error {
 		msgLen += len(e)
 	}
 	c.socketMu.Lock()
-	header := make([]byte, 4)
+	var header []byte
+	select {
+	case header = <-headerChan:
+	default:
+		header = make([]byte, 4)
+	}
 	binary.BigEndian.PutUint32(header, uint32(msgLen))
 	if _, err := c.buffer.Write(header); err != nil {
+		select {
+		case headerChan <- header:
+		default:
+		}
 		c.Close()
 		c.socketMu.Unlock()
 		return err
+	}
+	select {
+	case headerChan <- header:
+	default:
 	}
 	// write chunks one by one
 	for _, e := range msg {
@@ -141,11 +154,20 @@ func (c *MsgConn) readLoop() {
 
 // Receive next message from the other side.
 func (c *MsgConn) readPacket() ([]byte, error) {
-	header := make([]byte, 4)
+	var header []byte
+	select {
+	case header = <-headerChan:
+	default:
+		header = make([]byte, 4)
+	}
 	if _, err := io.ReadFull(c.socket, header); err != nil {
 		return nil, err
 	}
 	len := int(binary.BigEndian.Uint32(header))
+	select {
+	case headerChan <- header:
+	default:
+	}
 	if 0 < c.MaxPacketLen && c.MaxPacketLen < len {
 		return nil, MsgTooLongError
 	}

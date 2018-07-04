@@ -206,7 +206,14 @@ func NewClientConf() ClientConf {
 
 // Make synchronous request to the server.
 func (c *Client) Req(payload []byte, timeout time.Duration) ([]byte, error) {
-	return c.ReqChunks([][]byte{payload}, timeout)
+	var bts [][]byte
+	select {
+	case bts = <-bChan:
+		bts[0] = payload
+	default:
+		bts = [][]byte{payload}
+	}
+	return c.ReqChunks(bts[:1], timeout)
 }
 
 // Make synchronous request to the server.
@@ -218,6 +225,15 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	}
 	req := proto.NewRequest(payload, entry.Deadline)
 	encoded := req.Encode()
+
+	for i := range payload {
+		payload[i] = nil
+	}
+	select {
+	case bChan <- payload:
+	default:
+	}
+
 	// queue
 	c.registryMu.Lock()
 	if c.config.Concurrency <= len(c.registry) {
