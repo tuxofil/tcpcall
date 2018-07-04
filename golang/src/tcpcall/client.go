@@ -164,6 +164,12 @@ type UplinkCastEvent struct {
 	Data   []byte
 }
 
+var (
+	replyPool = sync.Pool{New: func() interface{} {
+		return make(chan RRReply, 1)
+	}}
+)
+
 // Connect to server side.
 // Return non nil error only when ClientConf.SyncConnect
 // option is set to truth and initial connection failed.
@@ -221,7 +227,10 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	c.hit(CC_REQUESTS)
 	entry := &RREntry{
 		Deadline: time.Now().Add(timeout),
-		Chan:     make(chan RRReply, 1),
+		Chan:     replyPool.Get().(chan RRReply),
+	}
+	if len(entry.Chan) > 0 {
+		<-entry.Chan
 	}
 	req := proto.NewRequest(payload, entry.Deadline)
 	encoded := req.Encode()
@@ -264,6 +273,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	select {
 	case reply := <-entry.Chan:
 		c.hit(CC_REPLIES)
+		replyPool.Put(entry.Chan)
 		if reply.Error == nil {
 			pools.AppendToTimer(after)
 			return bytes.Join(reply.Reply, []byte{}), nil
@@ -272,6 +282,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 		return nil, RemoteCrashedError
 	case <-after.C:
 		c.hit(CC_TIMEOUTS)
+		replyPool.Put(entry.Chan)
 		return nil, TimeoutError
 	}
 }
