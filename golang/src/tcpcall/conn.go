@@ -19,6 +19,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"tcpcall/pools"
 	"time"
 )
 
@@ -156,20 +157,12 @@ func (c *MsgConn) readLoop() {
 
 // Receive next message from the other side.
 func (c *MsgConn) readPacket() ([]byte, error) {
-	var header []byte
-	select {
-	case header = <-headerChan:
-	default:
-		header = make([]byte, headerLen)
-	}
+	header := pools.GetFreeBuffer(headerLen)
 	if _, err := io.ReadFull(c.socket, header); err != nil {
 		return nil, err
 	}
 	len := int(binary.BigEndian.Uint32(header))
-	select {
-	case headerChan <- header:
-	default:
-	}
+	pools.AppendToBuffer(header)
 	if 0 < c.MaxPacketLen && c.MaxPacketLen < len {
 		return nil, MsgTooLongError
 	}
@@ -177,5 +170,5 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 	if _, err := io.ReadFull(c.socket, buffer); err != nil {
 		return nil, err
 	}
-	return buffer, nil
+	return buffer[:len], nil
 }

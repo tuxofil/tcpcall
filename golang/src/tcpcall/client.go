@@ -18,6 +18,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"tcpcall/pools"
 	"tcpcall/proto"
 	"time"
 )
@@ -250,21 +251,26 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	// send through the network
 	if err := c.socket.Send(encoded); err != nil {
 		c.hit(CC_REQUEST_SEND_FAILS)
+		pools.AppendToBuffer(encoded[0])
 		if err == MsgConnNotConnectedError {
 			return nil, NotConnectedError
 		}
 		return nil, DisconnectedError
 	}
 	c.log("req sent")
+	pools.AppendToBuffer(encoded[0])
 	// wait for the response
+	after := pools.GetFreeTimer(entry.Deadline.Sub(time.Now()))
 	select {
 	case reply := <-entry.Chan:
 		c.hit(CC_REPLIES)
 		if reply.Error == nil {
+			pools.AppendToTimer(after)
 			return bytes.Join(reply.Reply, []byte{}), nil
 		}
+		pools.AppendToTimer(after)
 		return nil, RemoteCrashedError
-	case <-time.After(entry.Deadline.Sub(time.Now())):
+	case <-after.C:
 		c.hit(CC_TIMEOUTS)
 		return nil, TimeoutError
 	}
@@ -281,9 +287,11 @@ func (c *Client) CastChunks(data [][]byte) error {
 	encoded := proto.NewCast(data).Encode()
 	if err := c.socket.Send(encoded); err != nil {
 		c.hit(CC_CAST_SEND_FAILS)
+		pools.AppendToBuffer(encoded[0])
 		return err
 	}
 	c.log("cast sent")
+	pools.AppendToBuffer(encoded[0])
 	return nil
 }
 
@@ -395,10 +403,12 @@ func (c *Client) notifyClose() {
 // Send connection state change notification to Client owner
 func (c *Client) notifyPool(connected bool) {
 	if c.config.StateListener != nil && !c.closed {
+		after := pools.GetFreeTimer(time.Second / 5)
 		select {
 		case c.config.StateListener <- StateEvent{c, connected}:
-		case <-time.After(time.Second / 5):
+		case <-after.C:
 		}
+		pools.AppendToTimer(after)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"sync/atomic"
+	"tcpcall/pools"
 	"time"
 )
 
@@ -84,7 +85,7 @@ func NewCast(data [][]byte) *PacketCast {
 // Encode Request packet for network.
 func (p PacketRequest) Encode() [][]byte {
 	res := make([][]byte, len(p.Request)+1)
-	res[0] = make([]byte, 13) // packet header
+	res[0] = pools.GetFreeBuffer(13) // packet header
 	res[0][0] = REQUEST
 	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
 	binary.BigEndian.PutUint64(res[0][5:], uint64(p.Deadline.UnixNano()/1000))
@@ -95,7 +96,7 @@ func (p PacketRequest) Encode() [][]byte {
 // Encode Reply packet for network.
 func (p PacketReply) Encode() [][]byte {
 	res := make([][]byte, len(p.Reply)+1)
-	res[0] = make([]byte, 5)
+	res[0] = pools.GetFreeBuffer(5)
 	res[0][0] = REPLY
 	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
 	copy(res[1:], p.Reply)
@@ -105,7 +106,7 @@ func (p PacketReply) Encode() [][]byte {
 // Encode Cast packet for network.
 func (p PacketCast) Encode() [][]byte {
 	res := make([][]byte, len(p.Request)+1)
-	res[0] = make([]byte, 5)
+	res[0] = pools.GetFreeBuffer(5)
 	res[0][0] = CAST
 	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
 	copy(res[1:], p.Request)
@@ -115,7 +116,7 @@ func (p PacketCast) Encode() [][]byte {
 // Encode Error packet for network.
 func (p PacketError) Encode() [][]byte {
 	res := make([][]byte, len(p.Reason)+1)
-	res[0] = make([]byte, 5)
+	res[0] = pools.GetFreeBuffer(5)
 	res[0][0] = ERROR
 	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
 	copy(res[1:], p.Reason)
@@ -124,10 +125,11 @@ func (p PacketError) Encode() [][]byte {
 
 // Encode Suspend packet for network.
 func (p PacketFlowControlSuspend) Encode() [][]byte {
-	res := make([]byte, 9)
-	res[0] = FLOW_CONTROL_SUSPEND
-	binary.BigEndian.PutUint64(res[1:], uint64(p.Duration.Nanoseconds()/1000000))
-	return [][]byte{res}
+	res := make([][]byte, 1)
+	res[0] = pools.GetFreeBuffer(9)
+	res[0][0] = FLOW_CONTROL_SUSPEND
+	binary.BigEndian.PutUint64(res[0][1:], uint64(p.Duration.Nanoseconds()/1000000))
+	return res
 }
 
 // Encode Resume packet for network.

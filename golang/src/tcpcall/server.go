@@ -18,6 +18,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"tcpcall/pools"
 	"tcpcall/proto"
 	"time"
 )
@@ -414,11 +415,14 @@ func (h *ServerConn) close() {
 // Send packet back to the client side.
 func (h *ServerConn) writePacket(packet proto.Packet) error {
 	h.server.hit(SC_PACKET_WRITE)
-	if err := h.conn.Send(packet.Encode()); err != nil {
+	encoded := packet.Encode()
+	if err := h.conn.Send(encoded); err != nil {
 		h.server.hit(SC_PACKET_WRITE_ERRORS)
 		h.log("packet write: %v", err)
+		pools.AppendToBuffer(encoded[0])
 		return err
 	}
+	pools.AppendToBuffer(encoded[0])
 	return nil
 }
 
