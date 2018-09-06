@@ -370,6 +370,7 @@ func (p *Pool) getPeers() []string {
 // Process all events received from connection handlers.
 func startEventListenerDaemon(p *Pool) {
 	p.log("daemon started")
+	ticker := time.NewTicker(time.Millisecond * 200)
 	for !p.stopFlag {
 		select {
 		case state_event := <-p.stateEvents:
@@ -391,9 +392,10 @@ func startEventListenerDaemon(p *Pool) {
 		case resume := <-p.resumeEvents:
 			atomic.AddInt64(p.counters[PC_RESUME_EVENT], 1)
 			p.publishWorker(resume.Sender)
-		case <-time.After(time.Millisecond * 200):
+		case <-ticker.C:
 		}
 	}
+	ticker.Stop()
 	p.log("daemon terminated")
 }
 
