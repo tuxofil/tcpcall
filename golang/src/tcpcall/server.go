@@ -17,6 +17,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"tcpcall/proto"
 	"time"
 )
@@ -83,8 +84,7 @@ type Server struct {
 	// Set to truth when server is about to terminate.
 	stopFlag bool
 	// Counters array
-	counters   []int
-	countersMu sync.RWMutex
+	counters []*int64
 }
 
 // Server configuration
@@ -160,8 +160,11 @@ func Listen(conf ServerConf) (*Server, error) {
 			socket:      socket,
 			connections: make(map[*ServerConn]bool, conf.MaxConnections),
 			lock:        sync.Mutex{},
-			counters:    make([]int, SC_COUNT),
-			countersMu:  sync.RWMutex{},
+			counters:    make([]*int64, SC_COUNT),
+		}
+		for i := 0; i < SC_COUNT; i++ {
+			var v int64
+			server.counters[i] = &v
 		}
 		go server.acceptLoop()
 		return server, nil
@@ -226,14 +229,14 @@ func (s *Server) acceptLoop() {
 	defer s.log("daemon terminated")
 	for !s.stopFlag {
 		if s.config.MaxConnections <= len(s.connections) {
-			s.counters[SC_ACCEPT_OVERFLOWS]++
+			s.hit(SC_ACCEPT_OVERFLOWS)
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
 		socket, err := s.socket.Accept()
-		s.counters[SC_ACCEPTED]++
+		atomic.AddInt64(s.counters[SC_ACCEPTED], 1)
 		if err != nil {
-			s.counters[SC_ACCEPT_ERRORS]++
+			s.hit(SC_ACCEPT_ERRORS)
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
@@ -251,7 +254,7 @@ func (s *Server) acceptLoop() {
 			s.config.WriteBufferSize,
 			h.onRecv, h.onClose)
 		if err != nil {
-			s.counters[SC_HANDLER_CREATE_ERRORS]++
+			s.hit(SC_HANDLER_CREATE_ERRORS)
 			socket.Close()
 			continue
 		}
@@ -292,17 +295,15 @@ func (s *Server) log(format string, args ...interface{}) {
 
 // Thread safe counter increment.
 func (s *Server) hit(counter int) {
-	s.countersMu.Lock()
-	s.counters[counter]++
-	s.countersMu.Unlock()
+	atomic.AddInt64(s.counters[counter], 1)
 }
 
 // Return snapshot of server internal counters.
 func (s *Server) Counters() []int {
 	res := make([]int, SC_COUNT)
-	s.countersMu.RLock()
-	copy(res, s.counters)
-	s.countersMu.RUnlock()
+	for i, v := range s.counters {
+		res[i] = int(atomic.LoadInt64(v))
+	}
 	return res
 }
 

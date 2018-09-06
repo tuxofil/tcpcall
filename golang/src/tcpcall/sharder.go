@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,8 +46,7 @@ type Sharder struct {
 	// Controls access to the map of connection pools
 	mu sync.RWMutex
 	// Counters array
-	counters   []int
-	countersMu sync.RWMutex
+	counters []*int64
 	// sharding counters
 	sCounters []int
 }
@@ -81,12 +81,15 @@ type SharderInfo struct {
 // Create new Sharder instance with given configuration.
 func NewSharder(config SharderConf) *Sharder {
 	sharder := &Sharder{
-		config:     config,
-		nodes:      []string{},
-		conns:      map[string]*Pool{},
-		mu:         sync.RWMutex{},
-		counters:   make([]int, SHC_COUNT),
-		countersMu: sync.RWMutex{},
+		config:   config,
+		nodes:    []string{},
+		conns:    map[string]*Pool{},
+		mu:       sync.RWMutex{},
+		counters: make([]*int64, SHC_COUNT),
+	}
+	for i := 0; i < SHC_COUNT; i++ {
+		var v int64
+		sharder.counters[i] = &v
 	}
 	go sharder.reconfigLoop()
 	return sharder
@@ -124,9 +127,9 @@ func (s *Sharder) Req(id, body []byte, timeout time.Duration) (reply []byte, err
 // Return a snapshot of all internal counters.
 func (s *Sharder) Counters() []int {
 	res := make([]int, SHC_COUNT)
-	s.countersMu.RLock()
-	copy(res, s.counters)
-	s.countersMu.RUnlock()
+	for i, v := range s.counters {
+		res[i] = int(atomic.LoadInt64(v))
+	}
 	return res
 }
 
@@ -166,10 +169,10 @@ func (s *Sharder) reconfigLoop() {
 	for {
 		if nodes, err := s.config.NodesGetter(); err == nil {
 			s.setNodes(nodes)
-			s.counters[SHC_RECONFIGS]++
+			s.hit(SHC_RECONFIGS)
 			time.Sleep(s.config.ReconfigPeriod)
 		} else {
-			s.counters[SHC_RECONFIG_FAILS]++
+			s.hit(SHC_RECONFIG_FAILS)
 			time.Sleep(s.config.ReconfigPeriod / 10)
 		}
 	}
@@ -189,14 +192,14 @@ func (s *Sharder) setNodes(newNodes []string) {
 			poolCfg.Peers = peers
 			poolCfg.MaxRequestRetries = s.config.MaxRequestRetries
 			s.conns[n] = NewPool(poolCfg)
-			s.counters[SHC_POOLS_CREATED]++
+			s.hit(SHC_POOLS_CREATED)
 		}
 	}
 	for k, p := range s.conns {
 		if !inList(k, newNodes) {
 			p.Close()
 			delete(s.conns, k)
-			s.counters[SHC_POOLS_CLOSED]++
+			s.hit(SHC_POOLS_CLOSED)
 		}
 	}
 	s.nodes = newNodes
@@ -206,9 +209,7 @@ func (s *Sharder) setNodes(newNodes []string) {
 
 // Thread safe counter increment.
 func (s *Sharder) hit(counter int) {
-	s.countersMu.Lock()
-	s.counters[counter]++
-	s.countersMu.Unlock()
+	atomic.AddInt64(s.counters[counter], 1)
 }
 
 // Leave only unique elements from a string array.

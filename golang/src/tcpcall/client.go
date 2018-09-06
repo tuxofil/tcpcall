@@ -17,6 +17,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"tcpcall/proto"
 	"time"
 )
@@ -89,8 +90,7 @@ type Client struct {
 	// set to truth on client termination
 	closed bool
 	// Counters array
-	counters   []int
-	countersMu sync.RWMutex
+	counters []*int64
 }
 
 // Connection configuration.
@@ -178,8 +178,11 @@ func Dial(dst string, conf ClientConf) (*Client, error) {
 		registry:   RRegistry{},
 		registryMu: sync.Mutex{},
 		closeChan:  make(chan bool, 50),
-		counters:   make([]int, CC_COUNT),
-		countersMu: sync.RWMutex{},
+		counters:   make([]*int64, CC_COUNT),
+	}
+	for i := 0; i < CC_COUNT; i++ {
+		var v int64
+		c.counters[i] = &v
 	}
 	var err error
 	if conf.SyncConnect {
@@ -290,17 +293,15 @@ func (c *Client) Info() ClientInfo {
 // Return a snapshot of all internal counters.
 func (c *Client) Counters() []int {
 	res := make([]int, CC_COUNT)
-	c.countersMu.RLock()
-	copy(res, c.counters)
-	c.countersMu.RUnlock()
+	for i, v := range c.counters {
+		res[i] = int(atomic.LoadInt64(v))
+	}
 	return res
 }
 
 // Thread safe counter increment.
 func (c *Client) hit(counter int) {
-	c.countersMu.Lock()
-	c.counters[counter]++
-	c.countersMu.Unlock()
+	atomic.AddInt64(c.counters[counter], 1)
 }
 
 // Connect (or reconnect) to the server.
@@ -308,7 +309,7 @@ func (c *Client) connect() error {
 	c.disconnect()
 	conn, err := net.Dial("tcp", c.peer)
 	if err == nil {
-		c.counters[CC_CONNECTS]++
+		atomic.AddInt64(c.counters[CC_CONNECTS], 1)
 		c.log("connected")
 		msgConn, err := NewMsgConn(conn, c.config.MinFlushPeriod,
 			c.config.WriteBufferSize,
@@ -351,7 +352,7 @@ func (c *Client) disconnect() {
 	c.registry = RRegistry{}
 	c.registryMu.Unlock()
 	c.log("disconnected")
-	c.counters[CC_DISCONNECTS]++
+	c.hit(CC_DISCONNECTS)
 }
 
 // Goroutine.
@@ -394,36 +395,36 @@ func (c *Client) handlePacket(packet []byte) {
 	if err != nil {
 		// close connection on bad packet receive
 		c.log("decode failed: %s", err)
-		c.counters[CC_BAD_PACKETS]++
+		c.hit(CC_BAD_PACKETS)
 		c.disconnect()
 		return
 	}
 	switch ptype {
 	case proto.REPLY:
-		c.counters[CC_REPLY_PACKETS]++
+		c.hit(CC_REPLY_PACKETS)
 		p := payload.(*proto.PacketReply)
 		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{p.Reply, nil}
 		}
 	case proto.ERROR:
-		c.counters[CC_ERROR_PACKETS]++
+		c.hit(CC_ERROR_PACKETS)
 		p := payload.(*proto.PacketError)
 		if entry, ok := c.popRegistry(p.SeqNum); ok {
 			entry.Chan <- RRReply{nil, p.Reason}
 		}
 	case proto.FLOW_CONTROL_SUSPEND:
-		c.counters[CC_SUSPEND_PACKETS]++
+		c.hit(CC_SUSPEND_PACKETS)
 		if c.config.SuspendListener != nil {
 			p := payload.(*proto.PacketFlowControlSuspend)
 			c.config.SuspendListener <- SuspendEvent{c, p.Duration}
 		}
 	case proto.FLOW_CONTROL_RESUME:
-		c.counters[CC_RESUME_PACKETS]++
+		c.hit(CC_RESUME_PACKETS)
 		if c.config.ResumeListener != nil {
 			c.config.ResumeListener <- ResumeEvent{c}
 		}
 	case proto.UPLINK_CAST:
-		c.counters[CC_UCAST_PACKETS]++
+		c.hit(CC_UCAST_PACKETS)
 		if c.config.UplinkCastListener != nil {
 			p := payload.(*proto.PacketUplinkCast)
 			flat := bytes.Join(p.Data, []byte{})
