@@ -85,25 +85,10 @@ func (c *MsgConn) Send(msg [][]byte) error {
 		msgLen += len(e)
 	}
 	c.socketMu.Lock()
-	var header []byte
-	select {
-	case header = <-headerChan:
-	default:
-		header = make([]byte, 4)
-	}
-	binary.BigEndian.PutUint32(header, uint32(msgLen))
-	if _, err := c.buffer.Write(header); err != nil {
-		select {
-		case headerChan <- header:
-		default:
-		}
+	if err := binary.Write(c.buffer, binary.BigEndian, uint32(msgLen)); err != nil {
 		c.Close()
 		c.socketMu.Unlock()
 		return err
-	}
-	select {
-	case headerChan <- header:
-	default:
 	}
 	// write chunks one by one
 	for _, e := range msg {

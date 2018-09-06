@@ -25,9 +25,6 @@ var (
 	// Channel to hold
 	dBufSize = 1000
 	bChan    chan [][]byte
-	// Chanel to hold len buffers
-	dHeaderSize = 1000
-	headerChan  chan []byte
 )
 
 func init() {
@@ -70,15 +67,5 @@ func init() {
 		}
 		dBufSize = int(i)
 	}
-	if s := os.Getenv("TCPCALL_HEADER_BUF_SIZE"); 0 < len(s) {
-		i, err := strconv.ParseUint(s, 10, 64)
-		if err != nil {
-			log.Fatalf("bad value %#v for header"+
-				" buffer pool size: %s", s, err)
-		}
-		dHeaderSize = int(i)
-	}
-
 	bChan = make(chan [][]byte, dBufSize)
-	headerChan = make(chan []byte, dHeaderSize)
 }
