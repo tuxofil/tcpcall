@@ -1,3 +1,24 @@
+tcpcall (2.5.2) unstable; urgency=low
+
+  * Replace ReadFull with ReadAtLeast
+  * Remove header allocation
+  * Use return values
+  * Inline variable creation
+  * Add reply buffer
+  * Use PacketReply buffer
+  * Use static response bytes
+  * Use reusable ticker in event listener
+  * Add pool package
+  * Set static header length
+  * Remove mutexes initializations
+  * Use buffer of byte buffers to reduce allocations
+  * Use atomic operations
+  * Add minimal example page for Golang lib
+  * At last, add some project description
+  * Less defers
+
+ -- Aleksey Morarash <aleksey.morarash@envisionx.co>  Mon, 10 Sep 2018 12:49:38 +0300
+
 tcpcall (2.5.1) unstable; urgency=low
 
   * Adapt Erlang code for OTP 19.2
