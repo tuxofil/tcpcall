@@ -68,9 +68,7 @@ var (
 )
 
 var (
-	replyChan      = make(chan *PacketReply, 4000)
-	flowResumeByte = [][]byte{[]byte{FLOW_CONTROL_RESUME}}
-	uplinkCastByte = []byte{UPLINK_CAST}
+	replyChan = make(chan *PacketReply, 4000)
 )
 
 func init() {
@@ -140,13 +138,17 @@ func (p PacketFlowControlSuspend) Encode() [][]byte {
 
 // Encode Resume packet for network.
 func (p PacketFlowControlResume) Encode() [][]byte {
-	return flowResumeByte
+	res := make([][]byte, 1)
+	res[0] = pools.GetFreeBuffer(1)
+	res[0][0] = FLOW_CONTROL_RESUME
+	return res
 }
 
 // Encode Uplink Cast packet for network.
 func (p PacketUplinkCast) Encode() [][]byte {
 	res := make([][]byte, len(p.Data)+1)
-	res[0] = uplinkCastByte
+	res[0] = pools.GetFreeBuffer(1)
+	res[0][0] = UPLINK_CAST
 	copy(res[1:], p.Data)
 	return res
 }
