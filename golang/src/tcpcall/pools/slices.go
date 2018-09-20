@@ -1,53 +1,49 @@
+/**
+Provides API for byte slices reuse to reduce allocations.
+There are a few well known sizes of the buffers which
+are allocated often.
+*/
+
 package pools
 
-import "sync"
-
 var (
-	// Will be used to set size only for new buffers
-	BuffChanSize = 500
-	// Step for slices
-	//
-	// Change with caution: may leave some buffers unavailable!
-	SplitVal = 4
-	// Single dimensional
-	packetChan  = make(map[int]chan []byte)
-	packetChanM sync.RWMutex
+	// List of slice sizes. Only these values can be
+	// used for GetFreeBuffer() and AppendToBuffer() calls.
+	gValidSizes = []int{1, 4, 5, 9, 13}
+	// Map slice size to a channel inside gByteSlicePools array.
+	gSlicesIndex = []int{
+		-1, 0, -1, -1, 1,
+		2, -1, -1, -1, 3,
+		-1, -1, -1, 4}
+	// Array of byte slice pools
+	gByteSlicePools = make([]chan []byte, len(gValidSizes))
 )
 
-func GetFreeBuffer(nLen int) []byte {
-	// Get more than needed to fulfill or expectations
-	modulo := nLen / SplitVal
-	if nLen%SplitVal != 0 {
-		modulo++
+// Module initialisation hook.
+func init() {
+	maxPoolSize := 500
+	for _, i := range gValidSizes {
+		gByteSlicePools[gSlicesIndex[i]] =
+			make(chan []byte, maxPoolSize)
 	}
-	packetChanM.RLock()
-	chn := packetChan[modulo]
-	if chn == nil {
-		chn = make(chan []byte, BuffChanSize)
-		packetChanM.RUnlock()
-		packetChanM.Lock()
-		packetChan[modulo] = chn
-		packetChanM.Unlock()
-	} else {
-		packetChanM.RUnlock()
-	}
-	var buf []byte
-	select {
-	case buf = <-chn:
-	default:
-		buf = make([]byte, SplitVal*modulo)
-	}
-	return buf[:nLen]
 }
 
-// Works best when inserting buffer after getting it from GetFreeBuffer
-//
-// Will drop buffer if no or full channel
-func AppendToBuffer(buf []byte) {
-	packetChanM.RLock()
+// GetFreeBuffer returns slice of given size
+// from the pool or create new one if pool is empty.
+func GetFreeBuffer(size int) []byte {
 	select {
-	case packetChan[cap(buf)/SplitVal] <- buf:
+	case buf := <-gByteSlicePools[gSlicesIndex[size]]:
+		return buf
 	default:
 	}
-	packetChanM.RUnlock()
+	return make([]byte, size)
+}
+
+// AppendToBuffer returns byte slice to the pool.
+// If pool is full, the slice is discarded.
+func AppendToBuffer(buf []byte) {
+	select {
+	case gByteSlicePools[gSlicesIndex[len(buf)]] <- buf:
+	default:
+	}
 }
