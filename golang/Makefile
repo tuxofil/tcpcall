@@ -2,8 +2,10 @@
 
 all:
 
+export GOPATH = $(shell pwd)
+
 test:
-	GOPATH=`pwd` go test -v tcpcall
+	go test -v tcpcall
 
 fmt:
 	find . -type f -name \*.go -exec gofmt -w '{}' ';'
