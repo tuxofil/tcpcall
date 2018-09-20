@@ -5,6 +5,7 @@ all:
 export GOPATH = $(shell pwd)
 
 test:
+	go clean -testcache || true
 	go test -v tcpcall
 
 fmt:
