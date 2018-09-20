@@ -24,7 +24,7 @@ import (
 )
 
 // Packet header Len
-const headerLen = 4
+const HEADER_LEN = 4
 
 // Errors
 var (
@@ -142,8 +142,8 @@ func (c *MsgConn) readLoop() {
 
 // Receive next message from the other side.
 func (c *MsgConn) readPacket() ([]byte, error) {
-	header := pools.GetFreeBuffer(headerLen)
-	if _, err := io.ReadAtLeast(c.socket, header, headerLen); err != nil {
+	header := pools.GetFreeBuffer(HEADER_LEN)
+	if _, err := io.ReadAtLeast(c.socket, header, len(header)); err != nil {
 		return nil, err
 	}
 	len := int(binary.BigEndian.Uint32(header))
