@@ -51,9 +51,13 @@ type MsgConn struct {
 }
 
 // Create new message oriented connection.
-func NewMsgConn(socket net.Conn, minFlushPeriod time.Duration,
+func NewMsgConn(
+	socket net.Conn,
+	minFlushPeriod time.Duration,
 	writeBufferSize int,
-	handler func([]byte), onClose func()) (*MsgConn, error) {
+	handler func([]byte),
+	onClose func(),
+) (*MsgConn, error) {
 	if err := socket.SetReadDeadline(time.Time{}); err != nil {
 		return nil, err
 	}
