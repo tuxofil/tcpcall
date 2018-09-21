@@ -171,13 +171,13 @@ func NewPoolConf() PoolConf {
 		Peers:             []string{},
 		PeersFetcher:      nil,
 		ReconfigPeriod:    time.Second * 5,
-		Concurrency:       defConcurrency,
+		Concurrency:       gConcurrency,
 		ReconnectPeriod:   time.Millisecond * 100,
 		MaxRequestRetries: -1,
 		MaxCastRetries:    -1,
-		MinFlushPeriod:    defMinFlush,
-		WriteBufferSize:   defWBufSize,
-		Trace:             tracePool,
+		MinFlushPeriod:    gMinFlushPeriod,
+		WriteBufferSize:   gWriteBufferSize,
+		Trace:             gTracePool,
 	}
 }
 

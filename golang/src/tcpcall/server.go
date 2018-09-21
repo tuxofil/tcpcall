@@ -178,9 +178,9 @@ func NewServerConf() ServerConf {
 		MaxConnections:  500,
 		Concurrency:     1000,
 		SuspendDuration: time.Second,
-		MinFlushPeriod:  defMinFlush,
-		WriteBufferSize: defWBufSize,
-		Trace:           traceServer,
+		MinFlushPeriod:  gMinFlushPeriod,
+		WriteBufferSize: gWriteBufferSize,
+		Trace:           gTraceServer,
 	}
 }
 

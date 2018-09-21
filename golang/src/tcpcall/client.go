@@ -165,7 +165,9 @@ type UplinkCastEvent struct {
 }
 
 var (
-	replyPool = sync.Pool{New: func() interface{} {
+	// gReplyPool is a pool of channels for replies.
+	// Used to decrease allocations.
+	gReplyPool = sync.Pool{New: func() interface{} {
 		return make(chan RRReply, 1)
 	}}
 )
@@ -201,12 +203,12 @@ func Dial(dst string, conf ClientConf) (*Client, error) {
 // Create default client configuration
 func NewClientConf() ClientConf {
 	return ClientConf{
-		Concurrency:     defConcurrency,
+		Concurrency:     gConcurrency,
 		ReconnectPeriod: time.Millisecond * 100,
-		MinFlushPeriod:  defMinFlush,
-		WriteBufferSize: defWBufSize,
+		MinFlushPeriod:  gMinFlushPeriod,
+		WriteBufferSize: gWriteBufferSize,
 		SyncConnect:     true,
-		Trace:           traceClient,
+		Trace:           gTraceClient,
 	}
 }
 
@@ -227,7 +229,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	c.hit(CC_REQUESTS)
 	entry := &RREntry{
 		Deadline: time.Now().Add(timeout),
-		Chan:     replyPool.Get().(chan RRReply),
+		Chan:     gReplyPool.Get().(chan RRReply),
 	}
 	if len(entry.Chan) > 0 {
 		<-entry.Chan
@@ -273,7 +275,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	select {
 	case reply := <-entry.Chan:
 		c.hit(CC_REPLIES)
-		replyPool.Put(entry.Chan)
+		gReplyPool.Put(entry.Chan)
 		if reply.Error == nil {
 			pools.AppendToTimer(after)
 			return bytes.Join(reply.Reply, []byte{}), nil
@@ -282,7 +284,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 		return nil, RemoteCrashedError
 	case <-after.C:
 		c.hit(CC_TIMEOUTS)
-		replyPool.Put(entry.Chan)
+		gReplyPool.Put(entry.Chan)
 		return nil, TimeoutError
 	}
 }
