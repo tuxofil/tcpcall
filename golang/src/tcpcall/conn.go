@@ -134,10 +134,10 @@ func (c *MsgConn) Closed() bool {
 // Receive incoming messages from the other side
 // and call callback function for each.
 func (c *MsgConn) readLoop() {
-	defer c.Close()
 	for {
 		packet, err := c.readPacket()
 		if err != nil {
+			c.Close()
 			return
 		}
 		c.handler(packet)
