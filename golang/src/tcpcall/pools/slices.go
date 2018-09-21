@@ -8,7 +8,7 @@ package pools
 
 var (
 	// List of slice sizes. Only these values can be
-	// used for GetFreeBuffer() and AppendToBuffer() calls.
+	// used for GetFreeBuffer() and ReleaseBuffer() calls.
 	gValidSizes = []int{1, 4, 5, 9, 13}
 	// Map slice size to a channel inside gByteSlicePools array.
 	gSlicesIndex = []int{
@@ -39,9 +39,9 @@ func GetFreeBuffer(size int) []byte {
 	return make([]byte, size)
 }
 
-// AppendToBuffer returns byte slice to the pool.
+// ReleaseBuffer returns byte slice to the pool.
 // If pool is full, the slice is discarded.
-func AppendToBuffer(buf []byte) {
+func ReleaseBuffer(buf []byte) {
 	select {
 	case gByteSlicePools[gSlicesIndex[len(buf)]] <- buf:
 	default:

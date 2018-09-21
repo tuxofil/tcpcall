@@ -151,7 +151,7 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 		return nil, err
 	}
 	len := int(binary.BigEndian.Uint32(header))
-	pools.AppendToBuffer(header)
+	pools.ReleaseBuffer(header)
 	if 0 < c.MaxPacketLen && c.MaxPacketLen < len {
 		return nil, MsgTooLongError
 	}

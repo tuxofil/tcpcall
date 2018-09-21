@@ -25,8 +25,8 @@ func GetFreeTimer(dur time.Duration) (t *time.Timer) {
 	return
 }
 
-// AppendToTimer stops and puts timer to pool
-func AppendToTimer(t *time.Timer) {
+// ReleaseTimer stops and puts timer to pool
+func ReleaseTimer(t *time.Timer) {
 	if !t.Stop() {
 		if len(t.C) > 0 {
 			<-t.C

@@ -419,10 +419,10 @@ func (h *ServerConn) writePacket(packet proto.Packet) error {
 	if err := h.conn.Send(encoded); err != nil {
 		h.server.hit(SC_PACKET_WRITE_ERRORS)
 		h.log("packet write: %v", err)
-		pools.AppendToBuffer(encoded[0])
+		pools.ReleaseBuffer(encoded[0])
 		return err
 	}
-	pools.AppendToBuffer(encoded[0])
+	pools.ReleaseBuffer(encoded[0])
 	return nil
 }
 

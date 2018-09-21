@@ -247,7 +247,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	// send through the network
 	if err := c.socket.Send(encoded); err != nil {
 		c.hit(CC_REQUEST_SEND_FAILS)
-		pools.AppendToBuffer(encoded[0])
+		pools.ReleaseBuffer(encoded[0])
 		gReplyPool.Put(entry.Chan)
 		if err == MsgConnNotConnectedError {
 			return nil, NotConnectedError
@@ -255,7 +255,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 		return nil, DisconnectedError
 	}
 	c.log("req sent")
-	pools.AppendToBuffer(encoded[0])
+	pools.ReleaseBuffer(encoded[0])
 	// wait for the response
 	after := pools.GetFreeTimer(entry.Deadline.Sub(time.Now()))
 	select {
@@ -263,10 +263,10 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 		c.hit(CC_REPLIES)
 		gReplyPool.Put(entry.Chan)
 		if reply.Error == nil {
-			pools.AppendToTimer(after)
+			pools.ReleaseTimer(after)
 			return bytes.Join(reply.Reply, []byte{}), nil
 		}
-		pools.AppendToTimer(after)
+		pools.ReleaseTimer(after)
 		return nil, RemoteCrashedError
 	case <-after.C:
 		c.hit(CC_TIMEOUTS)
@@ -286,11 +286,11 @@ func (c *Client) CastChunks(data [][]byte) error {
 	encoded := proto.NewCast(data).Encode()
 	if err := c.socket.Send(encoded); err != nil {
 		c.hit(CC_CAST_SEND_FAILS)
-		pools.AppendToBuffer(encoded[0])
+		pools.ReleaseBuffer(encoded[0])
 		return err
 	}
 	c.log("cast sent")
-	pools.AppendToBuffer(encoded[0])
+	pools.ReleaseBuffer(encoded[0])
 	return nil
 }
 
@@ -407,7 +407,7 @@ func (c *Client) notifyPool(connected bool) {
 		case c.config.StateListener <- StateEvent{c, connected}:
 		case <-after.C:
 		}
-		pools.AppendToTimer(after)
+		pools.ReleaseTimer(after)
 	}
 }
 
