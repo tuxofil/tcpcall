@@ -234,6 +234,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	if c.config.Concurrency <= len(c.registry) {
 		c.registryMu.Unlock()
 		c.hit(CC_OVERLOADS)
+		gReplyPool.Put(entry.Chan)
 		return nil, OverloadError
 	}
 	// as far as seqnum is uint32, we'll do no checks
@@ -247,6 +248,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	if err := c.socket.Send(encoded); err != nil {
 		c.hit(CC_REQUEST_SEND_FAILS)
 		pools.AppendToBuffer(encoded[0])
+		gReplyPool.Put(entry.Chan)
 		if err == MsgConnNotConnectedError {
 			return nil, NotConnectedError
 		}
