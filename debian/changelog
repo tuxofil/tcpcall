@@ -1,3 +1,20 @@
+tcpcall (2.5.3) unstable; urgency=low
+
+  * Rename functions to make them more clear
+  * Add missed channel release
+  * Revert "Use buffer of byte buffers to reduce allocations"
+  * Refactor and document global variables
+  * Add extra test for high concurrency
+  * Do not use defer, make code more clear
+  * Style fix for function signature
+  * Disable test results caching
+  * Move GOPATH setting out of target
+  * Fix bug when "const" slice was returned to pool
+  * Simplify pool of byte slices
+  * Make const name uppercased
+
+ -- Aleksey Morarash <aleksey.morarash@envisionx.co>  Fri, 21 Sep 2018 15:36:29 +0300
+
 tcpcall (2.5.2) unstable; urgency=low
 
   * Replace ReadFull with ReadAtLeast
