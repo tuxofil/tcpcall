@@ -32,9 +32,6 @@ var (
 	// 0 means data will be written to the socket
 	// immediately.
 	gMinFlushPeriod time.Duration
-	// Channel to hold
-	dBufSize = 1000
-	bChan    chan [][]byte
 )
 
 func init() {
@@ -68,14 +65,4 @@ func init() {
 		}
 		gMinFlushPeriod = d
 	}
-
-	if s := os.Getenv("TCPCALL_PAYLOAD_BUF_SIZE"); 0 < len(s) {
-		i, err := strconv.ParseUint(s, 10, 64)
-		if err != nil {
-			log.Fatalf("bad value %#v for payload"+
-				" buffer pool size: %s", s, err)
-		}
-		dBufSize = int(i)
-	}
-	bChan = make(chan [][]byte, dBufSize)
 }

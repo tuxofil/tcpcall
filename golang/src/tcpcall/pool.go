@@ -183,14 +183,7 @@ func NewPoolConf() PoolConf {
 
 // Make request.
 func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) {
-	var bts [][]byte
-	select {
-	case bts = <-bChan:
-		bts[0] = bytes
-	default:
-		bts = [][]byte{bytes}
-	}
-	return p.ReqChunks(bts, timeout)
+	return p.ReqChunks([][]byte{bytes}, timeout)
 }
 
 // Make request.
