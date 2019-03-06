@@ -224,18 +224,14 @@ func (s *Server) acceptLoop() {
 	s.log("daemon started")
 	defer s.log("daemon terminated")
 	for {
-		s.lock.RLock()
-		if s.stopFlag {
-			s.lock.RUnlock()
+		if s.Stopped() {
 			return
 		}
-		if s.config.MaxConnections <= len(s.connections) {
-			s.lock.RUnlock()
+		if s.config.MaxConnections <= s.Connections() {
 			s.counters[SC_ACCEPT_OVERFLOWS]++
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
-		s.lock.RUnlock()
 		socket, err := s.socket.Accept()
 		s.counters[SC_ACCEPTED]++
 		if err != nil {
@@ -243,7 +239,7 @@ func (s *Server) acceptLoop() {
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
-		if s.stopFlag {
+		if s.Stopped() {
 			socket.Close()
 			return
 		}
@@ -268,6 +264,20 @@ func (s *Server) acceptLoop() {
 		s.connections[h] = struct{}{}
 		s.lock.Unlock()
 	}
+}
+
+func (s *Server) Connections() int {
+	s.lock.RLock()
+	res := len(s.connections)
+	s.lock.RUnlock()
+	return res
+}
+
+func (s *Server) Stopped() bool {
+	s.lock.RLock()
+	res := s.stopFlag
+	s.lock.RUnlock()
+	return res
 }
 
 // Return count of active client connections opened.
