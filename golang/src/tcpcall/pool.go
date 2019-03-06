@@ -302,8 +302,8 @@ func (p *Pool) Close() {
 			c.Close()
 		}
 	}
-	p.lock.Unlock()
 	p.stopFlag = true
+	p.lock.Unlock()
 }
 
 // Return address list of all connections in the pool.
@@ -366,7 +366,7 @@ func (p *Pool) getPeers() []string {
 func startEventListenerDaemon(p *Pool) {
 	p.log("daemon started")
 	ticker := time.NewTicker(time.Millisecond * 200)
-	for !p.stopFlag {
+	for !p.Stopped() {
 		select {
 		case state_event := <-p.stateEvents:
 			p.counters[PC_STATE_EVENT]++
@@ -398,12 +398,20 @@ func startEventListenerDaemon(p *Pool) {
 // Reconfigures the pool on the fly.
 func startConfiguratorDaemon(p *Pool) {
 	p.log("reconfigurator daemon started")
-	for !p.stopFlag {
+	for !p.Stopped() {
 		p.applyPeers(p.getPeers())
 		p.counters[PC_RECONFIG]++
 		time.Sleep(p.config.ReconfigPeriod)
 	}
 	p.log("reconfigurator daemon terminated")
+}
+
+// Return true when pool is closed and cannot be used anymore.
+func (p *Pool) Stopped() bool {
+	p.lock.RLock()
+	res := p.stopFlag
+	p.lock.RUnlock()
+	return res
 }
 
 // Apply new list of target peers.
@@ -418,7 +426,7 @@ func (p *Pool) applyPeers(peers []string) {
 		return l
 	}
 	for i := 0; i < mlen(); {
-		if p.stopFlag {
+		if p.Stopped() {
 			return
 		}
 		if i < len(peers) && i < len(p.clients) {
