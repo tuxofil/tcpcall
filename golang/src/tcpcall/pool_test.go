@@ -2,110 +2,105 @@ package tcpcall
 
 import (
 	"log"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
 
-func TestEquals(t *testing.T) {
-	data := []struct {
-		a []string
-		b []string
-		bool
-	}{
-		{[]string{}, []string{}, true},
-		{[]string{}, []string{"1"}, false},
-		{[]string{"1"}, []string{"1"}, true},
-		{[]string{"1"}, []string{"1", "2"}, false},
-	}
-	for i := 0; i < len(data); i++ {
-		e := equals(data[i].a, data[i].b)
-		if e != data[i].bool {
-			t.Errorf(
-				"%v and %v. Expected %v but %v found",
-				data[i].a, data[i].b, data[i].bool, e)
-		}
-	}
+type NodesCfg struct {
+	nodes []string
+	mu    sync.Mutex
 }
 
-func TestApplyPeers(t *testing.T) {
-	cfg := []string{}
+func (n *NodesCfg) Nodes() []string {
+	n.mu.Lock()
+	res := n.nodes
+	n.mu.Unlock()
+	if res == nil {
+		return []string{}
+	}
+	return res
+}
+
+func (n *NodesCfg) SetNodes(nodes ...string) {
+	log.Printf("set peers to %v", nodes)
+	n.mu.Lock()
+	n.nodes = nodes
+	n.mu.Unlock()
+}
+
+func (n *NodesCfg) Equal(nodes ...string) bool {
+	return reflect.DeepEqual(n.Nodes(), nodes)
+}
+
+func TestPoolApplyPeers(t *testing.T) {
+	cfg := NodesCfg{}
 	pool_conf := NewPoolConf()
 	pool_conf.ReconfigPeriod = time.Millisecond
-	pool_conf.PeersFetcher = func() []string {
-		return cfg
-	}
+	pool_conf.PeersFetcher = cfg.Nodes
 
 	log.Printf("creating pool")
 	pool := NewPool(pool_conf)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
+	}
+
+	cfg.SetNodes("127.0.0.1:5010")
+	time.Sleep(pool_conf.ReconfigPeriod * 2)
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5010"}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5010")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5010"}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020"}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5020"}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes("127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5020"}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes()
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020"}
-	log.Printf("set peers to %v", cfg)
+	cfg.SetNodes()
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
-		t.Fatal()
-	}
-
-	cfg = []string{}
-	log.Printf("set peers to %v", cfg)
-	time.Sleep(pool_conf.ReconfigPeriod * 2)
-	if !equals(cfg, pool.GetWorkerPeers()) {
+	if !cfg.Equal(pool.GetWorkerPeers()...) {
 		t.Fatal()
 	}
 }
 
 func TestWorkersCount(t *testing.T) {
-	cfg := []string{}
+	cfg := NodesCfg{}
 	poolConf := NewPoolConf()
 	poolConf.ReconfigPeriod = time.Millisecond
 	poolConf.ReconnectPeriod = time.Millisecond
-	poolConf.PeersFetcher = func() []string {
-		return cfg
-	}
+	poolConf.PeersFetcher = cfg.Nodes
 	pool := NewPool(poolConf)
 
 	if pool.GetWorkersCount() != 0 {
@@ -115,7 +110,7 @@ func TestWorkersCount(t *testing.T) {
 		t.Fatal()
 	}
 
-	cfg = []string{"127.0.0.1:5024", "127.0.0.1:5025"}
+	cfg.SetNodes("127.0.0.1:5024", "127.0.0.1:5025")
 	time.Sleep(poolConf.ReconfigPeriod * 2)
 
 	if pool.GetWorkersCount() != 2 {

@@ -512,19 +512,6 @@ func addToArray(index int, a *[]*Client, c *Client) {
 	*a = b
 }
 
-// Compare two string arrays for equality.
-func equals(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // Print message to the stdout if verbose mode is enabled.
 func (p *Pool) log(format string, args ...interface{}) {
 	if p.config.Trace {
