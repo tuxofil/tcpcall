@@ -182,8 +182,8 @@ func NewServerConf() ServerConf {
 
 // Stop the server.
 func (s *Server) Stop() {
-	s.stopFlag = true
 	s.lock.Lock()
+	s.stopFlag = true
 	for h, _ := range s.connections {
 		go h.close()
 	}
@@ -223,8 +223,12 @@ func (s *Server) acceptLoop() {
 	defer s.socket.Close()
 	s.log("daemon started")
 	defer s.log("daemon terminated")
-	for !s.stopFlag {
+	for {
 		s.lock.RLock()
+		if s.stopFlag {
+			s.lock.RUnlock()
+			return
+		}
 		if s.config.MaxConnections <= len(s.connections) {
 			s.lock.RUnlock()
 			s.counters[SC_ACCEPT_OVERFLOWS]++
