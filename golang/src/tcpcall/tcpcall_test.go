@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -211,8 +212,26 @@ func TestPoolSuspend(t *testing.T) {
 
 const NONE = 99999999999
 
+type CastResult struct {
+	Result int
+	Lock   sync.RWMutex
+}
+
+func (c *CastResult) Set(i int) {
+	c.Lock.Lock()
+	c.Result = i
+	c.Lock.Unlock()
+}
+
+func (c *CastResult) Get() int {
+	c.Lock.RLock()
+	res := c.Result
+	c.Lock.RUnlock()
+	return res
+}
+
 var ANY error
-var cast_result int
+var cast_result CastResult
 var server_conf ServerConf
 var client_conf ClientConf
 var pool_conf PoolConf
@@ -307,7 +326,7 @@ func CastCallback(data []byte) {
 	// decode request
 	arg := int(binary.BigEndian.Uint64(data[0:8]))
 	// do main work
-	cast_result = arg * 3
+	cast_result.Set(arg * 3)
 }
 
 func sleep(duration time.Duration) {
@@ -402,7 +421,7 @@ func MkCast(t *testing.T, c interface{}, arg int, expected_error error) {
 	data := make([]byte, 8)
 	binary.BigEndian.PutUint64(data, uint64(arg))
 	// send request
-	cast_result = NONE
+	cast_result.Set(NONE)
 	var err error
 	t0 := time.Now()
 	switch c.(type) {
@@ -419,9 +438,9 @@ func MkCast(t *testing.T, c interface{}, arg int, expected_error error) {
 		}
 		// wait until server processes the cast
 		time.Sleep(time.Millisecond * 10)
-		if cast_result != arg*3 {
+		if cast_result.Get() != arg*3 {
 			t.Errorf("req %d gave bad answer %d (expected %d). Took %s",
-				arg, cast_result, arg*3, elapsed.String())
+				arg, cast_result.Get(), arg*3, elapsed.String())
 		}
 		return
 	}
