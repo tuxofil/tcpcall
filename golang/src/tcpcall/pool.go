@@ -319,12 +319,18 @@ func (p *Pool) GetWorkerPeers() []string {
 
 // Return count of all workers.
 func (p *Pool) GetWorkersCount() int {
-	return len(p.clients)
+	p.lock.RLock()
+	res := len(p.clients)
+	p.lock.RUnlock()
+	return res
 }
 
 // Return count of active workers.
 func (p *Pool) GetActiveWorkersCount() int {
-	return len(p.active)
+	p.lock.RLock()
+	res := len(p.active)
+	p.lock.RUnlock()
+	return res
 }
 
 // Return count of requests being processed by all workers.
@@ -440,7 +446,7 @@ func (p *Pool) remWorker(index int) {
 	worker := p.clients[index]
 	p.log("removing worker for %s", worker.peer)
 	remFromArray(index, &p.clients)
-	p.unpublishWorker(worker)
+	p.unpublishWorkerUnsafe(worker)
 	worker.Close()
 	p.lock.Unlock()
 	p.counters[PC_WORKER_REMOVED]++
@@ -470,20 +476,32 @@ func (p *Pool) addWorker(index int, peer string) {
 
 // Add client connection to the list of active (connected) workers.
 func (p *Pool) publishWorker(c *Client) {
+	p.lock.Lock()
 	for i := 0; i < len(p.active); i++ {
 		if p.active[i] == c {
 			// already in
+			p.lock.Unlock()
 			return
 		}
 	}
 	p.log("publishing %s", c.peer)
 	addToArray(0, &p.active, c)
+	p.lock.Unlock()
 	p.counters[PC_WORKER_CONNECT]++
 }
 
 // Remove client connection from the list of active (connected) workers.
 // Return 'true' if the worker was really unpublished.
 func (p *Pool) unpublishWorker(c *Client) bool {
+	p.lock.Lock()
+	res := p.unpublishWorkerUnsafe(c)
+	p.lock.Unlock()
+	return res
+}
+
+// Remove client connection from the list of active (connected) workers.
+// Return 'true' if the worker was really unpublished.
+func (p *Pool) unpublishWorkerUnsafe(c *Client) bool {
 	for i := 0; i < len(p.active); i++ {
 		if p.active[i] == c {
 			p.log("unpublishing %s", c.peer)

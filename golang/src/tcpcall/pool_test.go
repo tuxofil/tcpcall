@@ -49,53 +49,53 @@ func TestPoolApplyPeers(t *testing.T) {
 	cfg.SetNodes("127.0.0.1:5010")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5010")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes("127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes()
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes("127.0.0.1:5000", "127.0.0.1:5010", "127.0.0.1:5020")
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 
 	cfg.SetNodes()
 	time.Sleep(pool_conf.ReconfigPeriod * 2)
 	if !cfg.Equal(pool.GetWorkerPeers()...) {
-		t.Fatal()
+		t.Fatalf("%#v != %#v", cfg.Nodes(), pool.GetWorkerPeers())
 	}
 }
 
-func TestWorkersCount(t *testing.T) {
+func TestPoolWorkersCount(t *testing.T) {
 	cfg := NodesCfg{}
 	poolConf := NewPoolConf()
 	poolConf.ReconfigPeriod = time.Millisecond
