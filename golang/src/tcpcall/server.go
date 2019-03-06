@@ -144,7 +144,7 @@ type ServerConn struct {
 	// request received from the client).
 	workers int
 	// Controls access to conn object.
-	lock sync.Mutex
+	lock sync.RWMutex
 	// Link to the Server instance this conection
 	// is originated from.
 	server *Server
@@ -253,7 +253,9 @@ func (s *Server) acceptLoop() {
 			socket.Close()
 			continue
 		}
+		h.lock.Lock()
 		h.conn = msgConn
+		h.lock.Unlock()
 		h.log("accepted")
 		s.lock.Lock()
 		s.connections[h] = struct{}{}
@@ -328,7 +330,9 @@ func (h *ServerConn) onClose() {
 // Handles incoming message from the remote side.
 func (h *ServerConn) onRecv(packet []byte) {
 	h.server.hit(SC_PACKET_INPUT)
+	h.lock.RLock()
 	if h.server.config.Concurrency < h.workers {
+		h.lock.RUnlock()
 		// max workers count reached
 		h.server.hit(SC_CONCURRENCY_OVERFLOWS)
 		if f := h.server.config.OnDrop; f != nil {
@@ -340,6 +344,7 @@ func (h *ServerConn) onRecv(packet []byte) {
 		}
 		return
 	}
+	h.lock.RUnlock()
 	h.incrementWorkers()
 	go func() {
 		// decode packet
