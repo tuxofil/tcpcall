@@ -80,7 +80,7 @@ type Server struct {
 	// List of established client connections.
 	connections map[*ServerConn]struct{}
 	// Controls access to client connections map.
-	lock sync.Mutex
+	lock sync.RWMutex
 	// Set to truth when server is about to terminate.
 	stopFlag bool
 	// Counters array
@@ -224,11 +224,14 @@ func (s *Server) acceptLoop() {
 	s.log("daemon started")
 	defer s.log("daemon terminated")
 	for !s.stopFlag {
+		s.lock.RLock()
 		if s.config.MaxConnections <= len(s.connections) {
+			s.lock.RUnlock()
 			s.counters[SC_ACCEPT_OVERFLOWS]++
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
+		s.lock.RUnlock()
 		socket, err := s.socket.Accept()
 		s.counters[SC_ACCEPTED]++
 		if err != nil {
@@ -320,10 +323,15 @@ func (s *Server) Info() ServerInfo {
 // Callback for message-oriented socket.
 // Handles connection close event.
 func (h *ServerConn) onClose() {
-	h.server.lock.Lock()
-	delete(h.server.connections, h)
-	h.server.lock.Unlock()
+	h.server.dropConn(h)
 	h.log("connection closed")
+}
+
+// Safely remove connection from the state.
+func (s *Server) dropConn(h *ServerConn) {
+	s.lock.Lock()
+	delete(s.connections, h)
+	s.lock.Unlock()
 }
 
 // Callback for message-oriented socket.
