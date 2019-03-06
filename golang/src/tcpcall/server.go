@@ -249,7 +249,7 @@ func (s *Server) acceptLoop() {
 		}
 		msgConn, err := NewMsgConn(socket,
 			s.config.MinFlushPeriod,
-			s.config.WriteBufferSize,
+			s.config.WriteBufferSize, 0,
 			h.onRecv, h.onClose)
 		if err != nil {
 			s.counters[SC_HANDLER_CREATE_ERRORS]++

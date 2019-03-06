@@ -40,7 +40,7 @@ type MsgConn struct {
 	// socket write mutex
 	socketMu sync.Mutex
 	// maximum allowed length for incoming packets
-	MaxPacketLen int
+	maxPacketLen int
 	// Minimum time between write buffer flushes
 	minFlushPeriod time.Duration
 	// incoming package handler
@@ -54,6 +54,7 @@ func NewMsgConn(
 	socket net.Conn,
 	minFlushPeriod time.Duration,
 	writeBufferSize int,
+	maxPacketLen int,
 	handler func([]byte),
 	onClose func(),
 ) (*MsgConn, error) {
@@ -65,6 +66,7 @@ func NewMsgConn(
 		buffer:         bufio.NewWriterSize(socket, writeBufferSize),
 		handler:        handler,
 		onDisconnect:   onClose,
+		maxPacketLen:   maxPacketLen,
 		minFlushPeriod: minFlushPeriod,
 	}
 	go conn.readLoop()
@@ -163,7 +165,7 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 	}
 	len := int(binary.BigEndian.Uint32(header))
 	pools.ReleaseBuffer(header)
-	if 0 < c.MaxPacketLen && c.MaxPacketLen < len {
+	if 0 < c.maxPacketLen && c.maxPacketLen < len {
 		return nil, MsgTooLongError
 	}
 	buffer := make([]byte, len)

@@ -334,11 +334,11 @@ func (c *Client) connect() error {
 		c.log("connected")
 		msgConn, err := NewMsgConn(conn, c.config.MinFlushPeriod,
 			c.config.WriteBufferSize,
+			c.config.MaxReplySize,
 			c.handlePacket, c.notifyClose)
 		if err != nil {
 			return err
 		}
-		msgConn.MaxPacketLen = c.config.MaxReplySize
 		c.socket = msgConn
 		c.notifyPool(true)
 	} else {
