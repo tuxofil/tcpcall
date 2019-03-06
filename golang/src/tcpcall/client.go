@@ -88,7 +88,8 @@ type Client struct {
 	// channel for disconnection events
 	closeChan chan bool
 	// set to truth on client termination
-	closed bool
+	closed   bool
+	closedMu sync.Mutex
 	// Counters array
 	counters   []int
 	countersMu sync.RWMutex
@@ -349,7 +350,9 @@ func (c *Client) connect() error {
 // Terminate the client.
 func (c *Client) Close() {
 	c.log("closing...")
+	c.closedMu.Lock()
 	c.closed = true
+	c.closedMu.Unlock()
 	c.disconnect()
 	c.log("closed")
 }
@@ -380,7 +383,10 @@ func (c *Client) disconnect() {
 func (c *Client) connectLoop() {
 	c.log("daemon started")
 	defer c.log("daemon terminated")
-	for !c.closed {
+	for {
+		if c.Closed() {
+			return
+		}
 		if c.socket == nil || c.socket.Closed() {
 			if err := c.connect(); err != nil {
 				time.Sleep(c.config.ReconnectPeriod)
@@ -397,9 +403,17 @@ func (c *Client) notifyClose() {
 	c.closeChan <- true
 }
 
+// Return true if client is terminated.
+func (c *Client) Closed() bool {
+	c.closedMu.Lock()
+	closed := c.closed
+	c.closedMu.Unlock()
+	return closed
+}
+
 // Send connection state change notification to Client owner
 func (c *Client) notifyPool(connected bool) {
-	if c.config.StateListener != nil && !c.closed {
+	if c.config.StateListener != nil && !c.Closed() {
 		after := pools.GetFreeTimer(time.Second / 5)
 		select {
 		case c.config.StateListener <- StateEvent{c, connected}:
