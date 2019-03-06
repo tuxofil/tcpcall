@@ -137,6 +137,9 @@ func (c *MsgConn) closeUnsafe() {
 
 // Return truth if connection is already closed.
 func (c *MsgConn) Closed() bool {
+	if c == nil {
+		return true
+	}
 	c.socketMu.Lock()
 	res := c.socket == nil
 	c.socketMu.Unlock()

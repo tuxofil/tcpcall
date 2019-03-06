@@ -84,7 +84,8 @@ type Client struct {
 	registry   RRegistry
 	registryMu sync.Mutex
 	// message oriented network socket
-	socket *MsgConn
+	socket   *MsgConn
+	socketMu sync.RWMutex
 	// channel for disconnection events
 	closeChan chan bool
 	// set to truth on client termination
@@ -242,7 +243,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	c.registryMu.Unlock()
 	defer c.popRegistry(req.SeqNum)
 	// send through the network
-	if err := c.socket.Send(encoded); err != nil {
+	if err := c.socketSend(encoded); err != nil {
 		c.hit(CC_REQUEST_SEND_FAILS)
 		pools.ReleaseBuffer(encoded[0])
 		gReplyPool.Put(entry.Chan)
@@ -272,6 +273,13 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	}
 }
 
+func (c *Client) socketSend(data [][]byte) error {
+	c.socketMu.RLock()
+	res := c.socket
+	c.socketMu.RUnlock()
+	return res.Send(data)
+}
+
 // Make asynchronous request to the server.
 func (c *Client) Cast(data []byte) error {
 	return c.CastChunks([][]byte{data})
@@ -281,7 +289,7 @@ func (c *Client) Cast(data []byte) error {
 func (c *Client) CastChunks(data [][]byte) error {
 	c.hit(CC_CASTS)
 	encoded := proto.NewCast(data).Encode()
-	if err := c.socket.Send(encoded); err != nil {
+	if err := c.socketSend(encoded); err != nil {
 		c.hit(CC_CAST_SEND_FAILS)
 		pools.ReleaseBuffer(encoded[0])
 		return err
@@ -304,7 +312,7 @@ func (c *Client) Info() ClientInfo {
 	return ClientInfo{
 		Config:    c.config,
 		Peer:      c.peer,
-		Connected: c.socket != nil && !c.socket.Closed(),
+		Connected: !c.socket.Closed(),
 		Counters:  c.Counters(),
 	}
 }
@@ -339,7 +347,9 @@ func (c *Client) connect() error {
 		if err != nil {
 			return err
 		}
+		c.socketMu.Lock()
 		c.socket = msgConn
+		c.socketMu.Unlock()
 		c.notifyPool(true)
 	} else {
 		c.log("failed to connect: %s", err)
@@ -359,7 +369,7 @@ func (c *Client) Close() {
 
 // Close connection to server.
 func (c *Client) disconnect() {
-	if c.socket == nil || c.socket.Closed() {
+	if c.socket.Closed() {
 		return
 	}
 	c.socket.Close()
