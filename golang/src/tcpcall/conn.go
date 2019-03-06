@@ -47,7 +47,6 @@ type MsgConn struct {
 	handler func([]byte)
 	// callback for disconnect event
 	onDisconnect func()
-	closed       bool
 }
 
 // Create new message oriented connection.
@@ -90,14 +89,14 @@ func (c *MsgConn) Send(msg [][]byte) error {
 	}
 	c.socketMu.Lock()
 	if err := binary.Write(c.buffer, binary.BigEndian, uint32(msgLen)); err != nil {
-		c.Close()
+		c.closeUnsafe()
 		c.socketMu.Unlock()
 		return err
 	}
 	// write chunks one by one
 	for _, e := range msg {
 		if _, err := c.buffer.Write(e); err != nil {
-			c.Close()
+			c.closeUnsafe()
 			c.socketMu.Unlock()
 			return err
 		}
@@ -106,7 +105,7 @@ func (c *MsgConn) Send(msg [][]byte) error {
 	if c.minFlushPeriod <= 0 ||
 		time.Now().After(c.lastFlush.Add(c.minFlushPeriod)) {
 		if err := c.buffer.Flush(); err != nil {
-			c.Close()
+			c.closeUnsafe()
 			c.socketMu.Unlock()
 			return err
 		}
@@ -118,8 +117,17 @@ func (c *MsgConn) Send(msg [][]byte) error {
 
 // Close connection.
 func (c *MsgConn) Close() {
+	c.socketMu.Lock()
+	c.closeUnsafe()
+	c.socketMu.Unlock()
+}
+
+func (c *MsgConn) closeUnsafe() {
+	if c.socket == nil {
+		return
+	}
 	c.socket.Close()
-	c.closed = true
+	c.socket = nil
 	if c.onDisconnect != nil {
 		c.onDisconnect()
 	}
@@ -127,7 +135,10 @@ func (c *MsgConn) Close() {
 
 // Return truth if connection is already closed.
 func (c *MsgConn) Closed() bool {
-	return c.closed
+	c.socketMu.Lock()
+	res := c.socket == nil
+	c.socketMu.Unlock()
+	return res
 }
 
 // Goroutine.
