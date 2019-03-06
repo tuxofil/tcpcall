@@ -17,7 +17,6 @@ import (
 	"log"
 	"net"
 	"sync"
-	"sync/atomic"
 	"tcpcall/pools"
 	"tcpcall/proto"
 	"time"
@@ -85,7 +84,8 @@ type Server struct {
 	// Set to truth when server is about to terminate.
 	stopFlag bool
 	// Counters array
-	counters []*int64
+	counters   []int
+	countersMu sync.RWMutex
 }
 
 // Server configuration
@@ -160,11 +160,7 @@ func Listen(conf ServerConf) (*Server, error) {
 			config:      conf,
 			socket:      socket,
 			connections: make(map[*ServerConn]bool, conf.MaxConnections),
-			counters:    make([]*int64, SC_COUNT),
-		}
-		for i := 0; i < SC_COUNT; i++ {
-			var v int64
-			server.counters[i] = &v
+			counters:    make([]int, SC_COUNT),
 		}
 		go server.acceptLoop()
 		return server, nil
@@ -229,14 +225,14 @@ func (s *Server) acceptLoop() {
 	defer s.log("daemon terminated")
 	for !s.stopFlag {
 		if s.config.MaxConnections <= len(s.connections) {
-			s.hit(SC_ACCEPT_OVERFLOWS)
+			s.counters[SC_ACCEPT_OVERFLOWS]++
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
 		socket, err := s.socket.Accept()
-		atomic.AddInt64(s.counters[SC_ACCEPTED], 1)
+		s.counters[SC_ACCEPTED]++
 		if err != nil {
-			s.hit(SC_ACCEPT_ERRORS)
+			s.counters[SC_ACCEPT_ERRORS]++
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
@@ -253,7 +249,7 @@ func (s *Server) acceptLoop() {
 			s.config.WriteBufferSize,
 			h.onRecv, h.onClose)
 		if err != nil {
-			s.hit(SC_HANDLER_CREATE_ERRORS)
+			s.counters[SC_HANDLER_CREATE_ERRORS]++
 			socket.Close()
 			continue
 		}
@@ -294,15 +290,17 @@ func (s *Server) log(format string, args ...interface{}) {
 
 // Thread safe counter increment.
 func (s *Server) hit(counter int) {
-	atomic.AddInt64(s.counters[counter], 1)
+	s.countersMu.Lock()
+	s.counters[counter]++
+	s.countersMu.Unlock()
 }
 
 // Return snapshot of server internal counters.
 func (s *Server) Counters() []int {
 	res := make([]int, SC_COUNT)
-	for i, v := range s.counters {
-		res[i] = int(atomic.LoadInt64(v))
-	}
+	s.countersMu.RLock()
+	copy(res, s.counters)
+	s.countersMu.RUnlock()
 	return res
 }
 

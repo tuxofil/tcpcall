@@ -17,7 +17,6 @@ import (
 	"log"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -81,7 +80,8 @@ type Pool struct {
 	// from the clients.
 	resumeEvents chan ResumeEvent
 	// Counters array
-	counters []*int64
+	counters   []int
+	countersMu sync.RWMutex
 }
 
 // Connection pool configuration.
@@ -154,11 +154,7 @@ func NewPool(conf PoolConf) *Pool {
 		stateEvents:   make(chan StateEvent, 10),
 		suspendEvents: make(chan SuspendEvent, 10),
 		resumeEvents:  make(chan ResumeEvent, 10),
-		counters:      make([]*int64, PC_COUNT),
-	}
-	for i := 0; i < PC_COUNT; i++ {
-		var v int64
-		p.counters[i] = &v
+		counters:      make([]int, PC_COUNT),
 	}
 	go startEventListenerDaemon(&p)
 	go startConfiguratorDaemon(&p)
@@ -367,7 +363,7 @@ func startEventListenerDaemon(p *Pool) {
 	for !p.stopFlag {
 		select {
 		case state_event := <-p.stateEvents:
-			atomic.AddInt64(p.counters[PC_STATE_EVENT], 1)
+			p.counters[PC_STATE_EVENT]++
 			switch {
 			case state_event.Online:
 				p.publishWorker(state_event.Sender)
@@ -375,7 +371,7 @@ func startEventListenerDaemon(p *Pool) {
 				p.unpublishWorker(state_event.Sender)
 			}
 		case suspend := <-p.suspendEvents:
-			atomic.AddInt64(p.counters[PC_SUSPEND_EVENT], 1)
+			p.counters[PC_SUSPEND_EVENT]++
 			if p.unpublishWorker(suspend.Sender) {
 				go func() {
 					time.Sleep(suspend.Duration)
@@ -383,7 +379,7 @@ func startEventListenerDaemon(p *Pool) {
 				}()
 			}
 		case resume := <-p.resumeEvents:
-			atomic.AddInt64(p.counters[PC_RESUME_EVENT], 1)
+			p.counters[PC_RESUME_EVENT]++
 			p.publishWorker(resume.Sender)
 		case <-ticker.C:
 		}
@@ -398,7 +394,7 @@ func startConfiguratorDaemon(p *Pool) {
 	p.log("reconfigurator daemon started")
 	for !p.stopFlag {
 		p.applyPeers(p.getPeers())
-		atomic.AddInt64(p.counters[PC_RECONFIG], 1)
+		p.counters[PC_RECONFIG]++
 		time.Sleep(p.config.ReconfigPeriod)
 	}
 	p.log("reconfigurator daemon terminated")
@@ -447,7 +443,7 @@ func (p *Pool) remWorker(index int) {
 	p.unpublishWorker(worker)
 	worker.Close()
 	p.lock.Unlock()
-	atomic.AddInt64(p.counters[PC_WORKER_REMOVED], 1)
+	p.counters[PC_WORKER_REMOVED]++
 }
 
 // Add new client connection to the pool.
@@ -469,7 +465,7 @@ func (p *Pool) addWorker(index int, peer string) {
 	p.lock.Lock()
 	addToArray(index, &p.clients, worker)
 	p.lock.Unlock()
-	atomic.AddInt64(p.counters[PC_WORKER_ADDED], 1)
+	p.counters[PC_WORKER_ADDED]++
 }
 
 // Add client connection to the list of active (connected) workers.
@@ -482,7 +478,7 @@ func (p *Pool) publishWorker(c *Client) {
 	}
 	p.log("publishing %s", c.peer)
 	addToArray(0, &p.active, c)
-	atomic.AddInt64(p.counters[PC_WORKER_CONNECT], 1)
+	p.counters[PC_WORKER_CONNECT]++
 }
 
 // Remove client connection from the list of active (connected) workers.
@@ -492,7 +488,7 @@ func (p *Pool) unpublishWorker(c *Client) bool {
 		if p.active[i] == c {
 			p.log("unpublishing %s", c.peer)
 			remFromArray(i, &p.active)
-			atomic.AddInt64(p.counters[PC_WORKER_DISCONNECT], 1)
+			p.counters[PC_WORKER_DISCONNECT]++
 			return true
 		}
 	}
@@ -539,15 +535,17 @@ func (p *Pool) log(format string, args ...interface{}) {
 
 // Thread safe increment of internal counter.
 func (p *Pool) hit(counter int) {
-	atomic.AddInt64(p.counters[counter], 1)
+	p.countersMu.Lock()
+	p.counters[counter]++
+	p.countersMu.Unlock()
 }
 
 // Return a snapshot of all internal counters.
 func (p *Pool) Counters() []int {
 	res := make([]int, PC_COUNT)
-	for i := range p.counters {
-		res[i] = int(atomic.LoadInt64(p.counters[i]))
-	}
+	p.countersMu.RLock()
+	copy(res, p.counters)
+	p.countersMu.RUnlock()
 	return res
 }
 

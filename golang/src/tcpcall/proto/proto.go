@@ -11,7 +11,7 @@ package proto
 import (
 	"encoding/binary"
 	"errors"
-	"sync/atomic"
+	"sync"
 	"tcpcall/pools"
 	"time"
 )
@@ -64,17 +64,13 @@ type PacketUplinkCast struct {
 
 // packet sequence number generator state
 var (
-	gSeq *uint32
+	gSeq   uint32
+	gSeqMu sync.Mutex
 )
 
 var (
 	replyChan = make(chan *PacketReply, 4000)
 )
-
-func init() {
-	var v uint32
-	gSeq = &v
-}
 
 // Create new request packet.
 func NewRequest(request [][]byte, deadline time.Time) *PacketRequest {
@@ -211,7 +207,11 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 
 // Generate sequence number (aka packet ID).
 func getSeqNum() uint32 {
-	return atomic.AddUint32(gSeq, 1) - 1
+	gSeqMu.Lock()
+	res := gSeq
+	gSeq++
+	gSeqMu.Unlock()
+	return res
 }
 
 func AppendToReply(r *PacketReply) {
