@@ -188,7 +188,7 @@ func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err
 	deadline := time.Now().Add(timeout)
 	retries := p.config.MaxRequestRetries
 	if retries < 0 {
-		retries = len(p.active)
+		retries = p.GetActiveWorkersCount()
 	}
 	var (
 		lastError error
@@ -237,7 +237,7 @@ func (p *Pool) CastChunks(data [][]byte) error {
 	p.hit(PC_CASTS)
 	retries := p.config.MaxCastRetries
 	if retries < 0 {
-		retries = len(p.active)
+		retries = p.GetActiveWorkersCount()
 	}
 	var retry bool
 	for {
