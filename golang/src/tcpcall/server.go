@@ -78,7 +78,7 @@ type Server struct {
 	// Server socket.
 	socket net.Listener
 	// List of established client connections.
-	connections map[*ServerConn]bool
+	connections map[*ServerConn]struct{}
 	// Controls access to client connections map.
 	lock sync.Mutex
 	// Set to truth when server is about to terminate.
@@ -159,7 +159,7 @@ func Listen(conf ServerConf) (*Server, error) {
 			bindAddr:    bindAddr,
 			config:      conf,
 			socket:      socket,
-			connections: make(map[*ServerConn]bool, conf.MaxConnections),
+			connections: map[*ServerConn]struct{}{},
 			counters:    make([]int, SC_COUNT),
 		}
 		go server.acceptLoop()
@@ -256,7 +256,7 @@ func (s *Server) acceptLoop() {
 		h.conn = msgConn
 		h.log("accepted")
 		s.lock.Lock()
-		s.connections[h] = true
+		s.connections[h] = struct{}{}
 		s.lock.Unlock()
 	}
 }
