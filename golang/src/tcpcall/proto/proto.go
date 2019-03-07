@@ -69,7 +69,7 @@ var (
 )
 
 var (
-	replyChan = make(chan *PacketReply, 4000)
+	gReplyChan = make(chan *PacketReply, 4000)
 )
 
 // Create new request packet.
@@ -177,7 +177,7 @@ func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
 		seqnum := binary.BigEndian.Uint32(bytes[1:])
 		var pckt *PacketReply
 		select {
-		case pckt = <-replyChan:
+		case pckt = <-gReplyChan:
 			pckt.SeqNum = seqnum
 			pckt.Reply = make([][]byte, 1)
 			pckt.Reply[0] = bytes[5:]
@@ -216,7 +216,7 @@ func getSeqNum() uint32 {
 
 func AppendToReply(r *PacketReply) {
 	select {
-	case replyChan <- r:
+	case gReplyChan <- r:
 	default:
 	}
 }
