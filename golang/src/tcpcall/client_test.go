@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 )
@@ -33,31 +35,36 @@ func TestClientConcurrency(t *testing.T) {
 		t.Fatalf("dial: %s", err)
 	}
 	// issue a lot of requests in parallel
-	chn := make(chan int, concurrency)
-	for i := 0; i < concurrency; i++ { // spawn senders
-		go workerLoop(t, chn, client)
+	var (
+		wg  sync.WaitGroup
+		chn = make(chan int, concurrency)
+	)
+	log.Printf("spawning...")
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go workerLoop(t, &wg, chn, client)
 	}
-	for i := 0; i < 500000; i++ { // send communicate signals
+	log.Printf("communicating...")
+	for i := 0; i < 500000; i++ {
 		chn <- i
 	}
-	for i := 0; i < concurrency; i++ { // send termination signals
-		chn <- -1
-	}
-	for 0 < len(chn) { // wait for senders to terminate
-		time.Sleep(10 * time.Millisecond)
-	}
-	// cleanup
+	log.Printf("terminating...")
+	close(chn)
+	wg.Wait()
+	log.Printf("cleanup...")
 	client.Close()
 	server.Stop()
 }
 
-func workerLoop(t *testing.T, chn chan int, client *Client) {
-	for sig := range chn {
-		if sig < 0 {
+func workerLoop(t *testing.T, wg *sync.WaitGroup, chn chan int, client *Client) {
+	defer wg.Done()
+	for {
+		sig, ok := <-chn
+		if !ok {
 			return
 		}
 		req := genReq(sig)
-		rep, err := client.Req(req, time.Second)
+		rep, err := client.Req(req, 2*time.Second)
 		if err != nil {
 			t.Fatalf("req #%d failed: %s", sig, err)
 		}
