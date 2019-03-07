@@ -40,8 +40,8 @@ func TestClientConcurrency(t *testing.T) {
 		chn = make(chan int, concurrency)
 	)
 	log.Printf("spawning...")
+	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
 		go workerLoop(t, &wg, chn, client)
 	}
 	log.Printf("communicating...")
