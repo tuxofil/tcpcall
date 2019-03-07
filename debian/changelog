@@ -1,3 +1,24 @@
+tcpcall (2.5.4) unstable; urgency=low
+
+  * Refactor client concurrency test
+  * Dispose of race for Pool.active array
+  * Satisfy race checker for tcpcall tests
+  * Dispose of race for Client.socket
+  * Dispose of race for Pool.stopFlag
+  * Dispose of race for MsgConn.MaxPacketLen
+  * Dispose of races for Server.connections and Server.stopFlag
+  * Dispose of races in pool
+  * Dispose of races for Client.closed
+  * Dispose of races in pool tests
+  * Dispose of race for Server.stopFlag
+  * Dispose of race for Server.connections
+  * Dispose of race on ServerConn.workers
+  * Simplify map used as set
+  * Dispose of races in MsgConn
+  * Revert "Use atomic operations"
+
+ -- Aleksey Morarash <aleksey.morarash@envisionx.co>  Thu, 07 Mar 2019 13:27:01 +0200
+
 tcpcall (2.5.3) unstable; urgency=low
 
   * Rename functions to make them more clear
