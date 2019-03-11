@@ -1,3 +1,11 @@
+tcpcall (2.5.5) unstable; urgency=low
+
+  * Refactor global var name
+  * Avoid nil pointer dereference on packet read
+  * Minor test optimization
+
+ -- Aleksey Morarash <aleksey.morarash@envisionx.co>  Mon, 11 Mar 2019 10:19:55 +0200
+
 tcpcall (2.5.4) unstable; urgency=low
 
   * Refactor client concurrency test
