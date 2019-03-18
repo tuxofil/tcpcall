@@ -54,12 +54,21 @@ type MsgConnConf struct {
 	OnDisconnect func()
 	// Minimum time between write buffer flushes
 	MinFlushPeriod time.Duration
+	// Optional interface to allocate byte slices for
+	// incoming packets. Allocator must return a slice of
+	// exact size given as the argument.
+	Allocator func(int) []byte
 }
 
 // Create new message oriented connection.
 func NewMsgConn(socket net.Conn, config MsgConnConf) (*MsgConn, error) {
 	if err := socket.SetReadDeadline(time.Time{}); err != nil {
 		return nil, err
+	}
+	if config.Allocator == nil {
+		config.Allocator = func(n int) []byte {
+			return make([]byte, n)
+		}
 	}
 	conn := &MsgConn{
 		config: config,
@@ -172,7 +181,7 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 	if m := c.config.MaxPacketLen; 0 < m && m < len {
 		return nil, MsgTooLongError
 	}
-	buffer := make([]byte, len)
+	buffer := c.config.Allocator(len)
 	if _, err := io.ReadAtLeast(socket, buffer, len); err != nil {
 		return nil, err
 	}

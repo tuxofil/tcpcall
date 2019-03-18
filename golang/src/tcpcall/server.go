@@ -115,6 +115,10 @@ type ServerConf struct {
 	SuspendDuration time.Duration
 	// Enable debug logging or not
 	Trace bool
+	// Optional interface to allocate byte slices for
+	// input requests and casts. Allocator must return a slice of
+	// exact size given as the argument.
+	Allocator func(int) []byte
 }
 
 // Server instance information returned by Info() method.
@@ -252,6 +256,7 @@ func (s *Server) acceptLoop() {
 			WriteBufferSize: s.config.WriteBufferSize,
 			Handler:         h.onRecv,
 			OnDisconnect:    h.onClose,
+			Allocator:       s.config.Allocator,
 		})
 		if err != nil {
 			s.counters[SC_HANDLER_CREATE_ERRORS]++
