@@ -34,40 +34,37 @@ var (
 
 // Message oriented connection
 type MsgConn struct {
+	// Configuration used to create MsgConn instance
+	config    MsgConnConf
 	socket    net.Conn
 	buffer    *bufio.Writer
 	lastFlush time.Time
 	// socket write mutex
 	socketMu sync.Mutex
-	// maximum allowed length for incoming packets
-	maxPacketLen int
+}
+
+type MsgConnConf struct {
+	// Socket write buffer size, in bytes
+	WriteBufferSize int
+	// Maximum allowed length of incoming packets, in bytes
+	MaxPacketLen int
+	// Mandatory incoming package handler
+	Handler func([]byte)
+	// Optional callback for disconnect event
+	OnDisconnect func()
 	// Minimum time between write buffer flushes
-	minFlushPeriod time.Duration
-	// incoming package handler
-	handler func([]byte)
-	// callback for disconnect event
-	onDisconnect func()
+	MinFlushPeriod time.Duration
 }
 
 // Create new message oriented connection.
-func NewMsgConn(
-	socket net.Conn,
-	minFlushPeriod time.Duration,
-	writeBufferSize int,
-	maxPacketLen int,
-	handler func([]byte),
-	onClose func(),
-) (*MsgConn, error) {
+func NewMsgConn(socket net.Conn, config MsgConnConf) (*MsgConn, error) {
 	if err := socket.SetReadDeadline(time.Time{}); err != nil {
 		return nil, err
 	}
 	conn := &MsgConn{
-		socket:         socket,
-		buffer:         bufio.NewWriterSize(socket, writeBufferSize),
-		handler:        handler,
-		onDisconnect:   onClose,
-		maxPacketLen:   maxPacketLen,
-		minFlushPeriod: minFlushPeriod,
+		config: config,
+		socket: socket,
+		buffer: bufio.NewWriterSize(socket, config.WriteBufferSize),
 	}
 	go conn.readLoop()
 	return conn, nil
@@ -104,8 +101,8 @@ func (c *MsgConn) Send(msg [][]byte) error {
 		}
 	}
 	// flush the buffer
-	if c.minFlushPeriod <= 0 ||
-		time.Now().After(c.lastFlush.Add(c.minFlushPeriod)) {
+	if c.config.MinFlushPeriod <= 0 ||
+		time.Now().After(c.lastFlush.Add(c.config.MinFlushPeriod)) {
 		if err := c.buffer.Flush(); err != nil {
 			c.closeUnsafe()
 			c.socketMu.Unlock()
@@ -130,8 +127,8 @@ func (c *MsgConn) closeUnsafe() {
 	}
 	c.socket.Close()
 	c.socket = nil
-	if c.onDisconnect != nil {
-		c.onDisconnect()
+	if c.config.OnDisconnect != nil {
+		c.config.OnDisconnect()
 	}
 }
 
@@ -156,7 +153,7 @@ func (c *MsgConn) readLoop() {
 			c.Close()
 			return
 		}
-		c.handler(packet)
+		c.config.Handler(packet)
 	}
 }
 
@@ -172,7 +169,7 @@ func (c *MsgConn) readPacket() ([]byte, error) {
 	}
 	len := int(binary.BigEndian.Uint32(header))
 	pools.ReleaseBuffer(header)
-	if 0 < c.maxPacketLen && c.maxPacketLen < len {
+	if m := c.config.MaxPacketLen; 0 < m && m < len {
 		return nil, MsgTooLongError
 	}
 	buffer := make([]byte, len)

@@ -247,10 +247,12 @@ func (s *Server) acceptLoop() {
 			peer:   socket.RemoteAddr().String(),
 			server: s,
 		}
-		msgConn, err := NewMsgConn(socket,
-			s.config.MinFlushPeriod,
-			s.config.WriteBufferSize, 0,
-			h.onRecv, h.onClose)
+		msgConn, err := NewMsgConn(socket, MsgConnConf{
+			MinFlushPeriod:  s.config.MinFlushPeriod,
+			WriteBufferSize: s.config.WriteBufferSize,
+			Handler:         h.onRecv,
+			OnDisconnect:    h.onClose,
+		})
 		if err != nil {
 			s.counters[SC_HANDLER_CREATE_ERRORS]++
 			socket.Close()

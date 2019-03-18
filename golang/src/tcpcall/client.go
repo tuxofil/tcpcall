@@ -340,10 +340,13 @@ func (c *Client) connect() error {
 	if err == nil {
 		c.counters[CC_CONNECTS]++
 		c.log("connected")
-		msgConn, err := NewMsgConn(conn, c.config.MinFlushPeriod,
-			c.config.WriteBufferSize,
-			c.config.MaxReplySize,
-			c.handlePacket, c.notifyClose)
+		msgConn, err := NewMsgConn(conn, MsgConnConf{
+			MinFlushPeriod:  c.config.MinFlushPeriod,
+			WriteBufferSize: c.config.WriteBufferSize,
+			MaxPacketLen:    c.config.MaxReplySize,
+			Handler:         c.handlePacket,
+			OnDisconnect:    c.notifyClose,
+		})
 		if err != nil {
 			return err
 		}
