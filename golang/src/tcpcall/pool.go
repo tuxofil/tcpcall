@@ -13,6 +13,7 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"sort"
@@ -178,12 +179,12 @@ func NewPoolConf() PoolConf {
 }
 
 // Make request.
-func (p *Pool) Req(bytes []byte, timeout time.Duration) (rep []byte, err error) {
-	return p.ReqChunks([][]byte{bytes}, timeout)
+func (p *Pool) ReqChunks(chunks [][]byte, timeout time.Duration) (rep []byte, err error) {
+	return p.Req(bytes.Join(chunks, nil), timeout)
 }
 
 // Make request.
-func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err error) {
+func (p *Pool) Req(data []byte, timeout time.Duration) (rep []byte, err error) {
 	p.hit(PC_REQUESTS)
 	deadline := time.Now().Add(timeout)
 	retries := p.config.MaxRequestRetries
@@ -203,7 +204,7 @@ func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err
 			p.hit(PC_REQUEST_ERRORS)
 			return nil, NotConnectedError
 		}
-		rep, err = client.ReqChunks(bytes, timeout)
+		rep, err = client.Req(data, timeout)
 		if err == nil {
 			return rep, nil
 		}
@@ -228,12 +229,12 @@ func (p *Pool) ReqChunks(bytes [][]byte, timeout time.Duration) (rep []byte, err
 }
 
 // Make asynchronous request to the server.
-func (p *Pool) Cast(data []byte) error {
-	return p.CastChunks([][]byte{data})
+func (p *Pool) CastChunks(chunks [][]byte) error {
+	return p.Cast(bytes.Join(chunks, nil))
 }
 
 // Make asynchronous request to the server.
-func (p *Pool) CastChunks(data [][]byte) error {
+func (p *Pool) Cast(data []byte) error {
 	p.hit(PC_CASTS)
 	retries := p.config.MaxCastRetries
 	if retries < 0 {
@@ -249,7 +250,7 @@ func (p *Pool) CastChunks(data [][]byte) error {
 			p.hit(PC_CAST_ERRORS)
 			return NotConnectedError
 		}
-		err := client.CastChunks(data)
+		err := client.Cast(data)
 		if err == nil {
 			return nil
 		}
@@ -379,10 +380,10 @@ func startEventListenerDaemon(p *Pool) {
 		case suspend := <-p.suspendEvents:
 			p.counters[PC_SUSPEND_EVENT]++
 			if p.unpublishWorker(suspend.Sender) {
-				go func() {
-					time.Sleep(suspend.Duration)
+				go func(d time.Duration) {
+					time.Sleep(d)
 					p.resumeEvents <- ResumeEvent{suspend.Sender}
-				}()
+				}(suspend.Duration)
 			}
 		case resume := <-p.resumeEvents:
 			p.counters[PC_RESUME_EVENT]++

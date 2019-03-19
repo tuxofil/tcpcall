@@ -12,12 +12,10 @@ Copyright: 2016, Aleksey Morarash <aleksey.morarash@gmail.com>
 package tcpcall
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"net"
 	"sync"
-	"tcpcall/pools"
 	"tcpcall/proto"
 	"time"
 )
@@ -357,7 +355,7 @@ func (s *Server) dropConn(h *ServerConn) {
 
 // Callback for message-oriented socket.
 // Handles incoming message from the remote side.
-func (h *ServerConn) onRecv(packet []byte) {
+func (h *ServerConn) onRecv(packet proto.Packet) {
 	h.server.hit(SC_PACKET_INPUT)
 	h.lock.RLock()
 	if h.server.config.Concurrency < h.workers {
@@ -365,7 +363,7 @@ func (h *ServerConn) onRecv(packet []byte) {
 		// max workers count reached
 		h.server.hit(SC_CONCURRENCY_OVERFLOWS)
 		if f := h.server.config.OnDrop; f != nil {
-			f(packet)
+			f(packet.Data)
 		}
 		if err := h.suspend(h.server.config.SuspendDuration); err != nil {
 			h.log("suspend send: %v", err)
@@ -376,26 +374,15 @@ func (h *ServerConn) onRecv(packet []byte) {
 	h.lock.RUnlock()
 	h.incrementWorkers()
 	go func() {
-		// decode packet
-		ptype, data, err := proto.Decode(packet)
-		if err != nil {
-			h.server.hit(SC_PACKET_DECODE_ERRORS)
-			h.log("packet decode failed: %v", err)
-			h.close()
-			h.decrementWorkers()
-			return
-		}
-		h.log("got packet of type %d: %v", ptype, data)
-		switch ptype {
+		h.log("got packet of type %d: %v", packet.Type, packet.Data)
+		switch packet.Type {
 		case proto.REQUEST:
 			h.server.hit(SC_REQUESTS)
-			h.processRequest(data.(*proto.PacketRequest))
+			h.processRequest(packet)
 		case proto.CAST:
 			h.server.hit(SC_CASTS)
 			if f := h.server.config.CastCallback; f != nil {
-				f(bytes.Join(
-					(data.(*proto.PacketCast)).Request,
-					[]byte{}))
+				f(packet.Data)
 			}
 		default:
 			// ignore packet
@@ -408,8 +395,7 @@ func (h *ServerConn) onRecv(packet []byte) {
 // Send 'suspend' signal to the connected client.
 func (h *ServerConn) suspend(duration time.Duration) error {
 	h.server.hit(SC_SUSPEND_REQUESTED)
-	packet := proto.PacketFlowControlSuspend{duration}
-	if err := h.writePacket(packet); err != nil {
+	if err := h.writePacket(proto.NewSuspend(duration)); err != nil {
 		h.server.hit(SC_SUSPEND_REQUEST_ERRORS)
 		return err
 	}
@@ -419,8 +405,7 @@ func (h *ServerConn) suspend(duration time.Duration) error {
 // Send 'resume' signal to the connected client.
 func (h *ServerConn) resume() error {
 	h.server.hit(SC_RESUME_REQUESTED)
-	packet := proto.PacketFlowControlResume{}
-	if err := h.writePacket(packet); err != nil {
+	if err := h.writePacket(proto.NewResume()); err != nil {
 		h.server.hit(SC_RESUME_REQUEST_ERRORS)
 		return err
 	}
@@ -430,8 +415,7 @@ func (h *ServerConn) resume() error {
 // Send uplink cast packet to client side.
 func (h *ServerConn) uplinkCast(data []byte) error {
 	h.server.hit(SC_UPLINK_CAST_REQUESTED)
-	packet := proto.PacketUplinkCast{[][]byte{data}}
-	if err := h.writePacket(packet); err != nil {
+	if err := h.writePacket(proto.NewUplinkCast(data)); err != nil {
 		h.server.hit(SC_UPLINK_CAST_ERRORS)
 		return err
 	}
@@ -447,26 +431,24 @@ func (h *ServerConn) close() {
 // Send packet back to the client side.
 func (h *ServerConn) writePacket(packet proto.Packet) error {
 	h.server.hit(SC_PACKET_WRITE)
-	encoded := packet.Encode()
-	if err := h.conn.Send(encoded); err != nil {
+	if err := h.conn.Send(packet); err != nil {
 		h.server.hit(SC_PACKET_WRITE_ERRORS)
 		h.log("packet write: %v", err)
-		pools.ReleaseBuffer(encoded[0])
 		return err
 	}
-	pools.ReleaseBuffer(encoded[0])
 	return nil
 }
 
 // Process synchronous request from the client.
-func (h *ServerConn) processRequest(req *proto.PacketRequest) {
-	var res []byte
+func (h *ServerConn) processRequest(req proto.Packet) {
+	var (
+		seqNum = req.SeqNum()
+		reply  []byte
+	)
 	if f := h.server.config.RequestCallback; f != nil {
-		res = f(bytes.Join(req.Request, []byte{}))
-	} else {
-		res = []byte{}
+		reply = f(req.Data)
 	}
-	replyPacket := proto.PacketReply{req.SeqNum, [][]byte{res}}
+	replyPacket := proto.NewReply(seqNum, reply)
 	if err := h.writePacket(replyPacket); err == nil {
 		h.log("sent reply: %v", replyPacket)
 	} else {

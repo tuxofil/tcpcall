@@ -10,9 +10,8 @@ package proto
 
 import (
 	"encoding/binary"
-	"errors"
+	"io"
 	"sync"
-	"tcpcall/pools"
 	"time"
 )
 
@@ -26,187 +25,25 @@ const (
 	UPLINK_CAST          = 6
 )
 
-type Packet interface {
-	Encode() [][]byte
+type Packet struct {
+	// Packet type identifier
+	Type int
+	// Packet headers. Actual length depends on packet type.
+	Headers [12]byte
+	// Packet data. Some packet types doesn't support it.
+	Data []byte
 }
 
-type PacketRequest struct {
-	SeqNum   uint32
-	Deadline time.Time
-	Request  [][]byte
-}
-
-type PacketReply struct {
-	SeqNum uint32
-	Reply  [][]byte
-}
-
-type PacketError struct {
-	SeqNum uint32
-	Reason [][]byte
-}
-
-type PacketCast struct {
-	SeqNum  uint32
-	Request [][]byte
-}
-
-type PacketFlowControlSuspend struct {
-	Duration time.Duration
-}
-
-type PacketFlowControlResume struct {
-}
-
-type PacketUplinkCast struct {
-	Data [][]byte
-}
-
-// packet sequence number generator state
 var (
+	// Shorthand for byte order
+	gOrder = binary.BigEndian
+	// packet sequence number generator state
 	gSeq   uint32
 	gSeqMu sync.Mutex
 )
 
-var (
-	gReplyChan = make(chan *PacketReply, 4000)
-)
-
-// Create new request packet.
-func NewRequest(request [][]byte, deadline time.Time) *PacketRequest {
-	return &PacketRequest{getSeqNum(), deadline, request}
-}
-
-// Create new cast packet.
-func NewCast(data [][]byte) *PacketCast {
-	return &PacketCast{0, data}
-}
-
-// Encode Request packet for network.
-func (p PacketRequest) Encode() [][]byte {
-	res := make([][]byte, len(p.Request)+1)
-	res[0] = pools.GetFreeBuffer(13) // packet header
-	res[0][0] = REQUEST
-	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
-	binary.BigEndian.PutUint64(res[0][5:], uint64(p.Deadline.UnixNano()/1000))
-	copy(res[1:], p.Request)
-	return res
-}
-
-// Encode Reply packet for network.
-func (p PacketReply) Encode() [][]byte {
-	res := make([][]byte, len(p.Reply)+1)
-	res[0] = pools.GetFreeBuffer(5)
-	res[0][0] = REPLY
-	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
-	copy(res[1:], p.Reply)
-	return res
-}
-
-// Encode Cast packet for network.
-func (p PacketCast) Encode() [][]byte {
-	res := make([][]byte, len(p.Request)+1)
-	res[0] = pools.GetFreeBuffer(5)
-	res[0][0] = CAST
-	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
-	copy(res[1:], p.Request)
-	return res
-}
-
-// Encode Error packet for network.
-func (p PacketError) Encode() [][]byte {
-	res := make([][]byte, len(p.Reason)+1)
-	res[0] = pools.GetFreeBuffer(5)
-	res[0][0] = ERROR
-	binary.BigEndian.PutUint32(res[0][1:], uint32(p.SeqNum))
-	copy(res[1:], p.Reason)
-	return res
-}
-
-// Encode Suspend packet for network.
-func (p PacketFlowControlSuspend) Encode() [][]byte {
-	res := make([][]byte, 1)
-	res[0] = pools.GetFreeBuffer(9)
-	res[0][0] = FLOW_CONTROL_SUSPEND
-	binary.BigEndian.PutUint64(res[0][1:], uint64(p.Duration.Nanoseconds()/1000000))
-	return res
-}
-
-// Encode Resume packet for network.
-func (p PacketFlowControlResume) Encode() [][]byte {
-	res := make([][]byte, 1)
-	res[0] = pools.GetFreeBuffer(1)
-	res[0][0] = FLOW_CONTROL_RESUME
-	return res
-}
-
-// Encode Uplink Cast packet for network.
-func (p PacketUplinkCast) Encode() [][]byte {
-	res := make([][]byte, len(p.Data)+1)
-	res[0] = pools.GetFreeBuffer(1)
-	res[0][0] = UPLINK_CAST
-	copy(res[1:], p.Data)
-	return res
-}
-
-// Decode network packet.
-func Decode(bytes []byte) (ptype int, packet interface{}, err error) {
-	if len(bytes) == 0 {
-		return -1, nil, errors.New("bad packet: empty")
-	}
-	ptype = int(bytes[0])
-	switch ptype {
-	case REQUEST:
-		if len(bytes) < 13 {
-			return -1, nil, errors.New("bad Request packet: header too small")
-		}
-		seqnum := binary.BigEndian.Uint32(bytes[1:])
-		micros := binary.BigEndian.Uint64(bytes[5:13])
-		deadline := time.Unix(0, int64(micros*1000))
-		return ptype, &PacketRequest{seqnum, deadline, [][]byte{bytes[13:]}}, nil
-	case CAST:
-		if len(bytes) < 5 {
-			return -1, nil, errors.New("bad Cast packet: header too small")
-		}
-		seqnum := binary.BigEndian.Uint32(bytes[1:])
-		return ptype, &PacketCast{seqnum, [][]byte{bytes[5:]}}, nil
-	case REPLY:
-		if len(bytes) < 5 {
-			return -1, nil, errors.New("bad Reply packet: header too small")
-		}
-		seqnum := binary.BigEndian.Uint32(bytes[1:])
-		var pckt *PacketReply
-		select {
-		case pckt = <-gReplyChan:
-			pckt.SeqNum = seqnum
-			pckt.Reply = make([][]byte, 1)
-			pckt.Reply[0] = bytes[5:]
-		default:
-			pckt = &PacketReply{seqnum, [][]byte{bytes[5:]}}
-		}
-		return ptype, pckt, nil
-	case ERROR:
-		if len(bytes) < 5 {
-			return -1, nil, errors.New("bad Error packet: header too small")
-		}
-		seqnum := binary.BigEndian.Uint32(bytes[1:])
-		return ptype, &PacketError{seqnum, [][]byte{bytes[5:]}}, nil
-	case FLOW_CONTROL_SUSPEND:
-		if len(bytes) < 9 {
-			return -1, nil, errors.New("bad Suspend packet: header too small")
-		}
-		millis := binary.BigEndian.Uint64(bytes[1:])
-		return ptype, &PacketFlowControlSuspend{time.Millisecond * time.Duration(millis)}, nil
-	case FLOW_CONTROL_RESUME:
-		return ptype, &PacketFlowControlResume{}, nil
-	case UPLINK_CAST:
-		return ptype, &PacketUplinkCast{[][]byte{bytes[1:]}}, nil
-	}
-	return -1, nil, errors.New("Not implemented")
-}
-
 // Generate sequence number (aka packet ID).
-func getSeqNum() uint32 {
+func GenSeqNum() uint32 {
 	gSeqMu.Lock()
 	res := gSeq
 	gSeq++
@@ -214,9 +51,100 @@ func getSeqNum() uint32 {
 	return res
 }
 
-func AppendToReply(r *PacketReply) {
-	select {
-	case gReplyChan <- r:
-	default:
+// Write packet to the stream.
+// Implements io.WriterTo interface.
+func (p Packet) WriteTo(writer io.Writer) (int64, error) {
+	headerLen := 4
+	switch p.Type {
+	case REQUEST:
+		headerLen = 12
+	case FLOW_CONTROL_SUSPEND:
+		headerLen = 8
+	case FLOW_CONTROL_RESUME, UPLINK_CAST:
+		headerLen = 0
 	}
+	packetLen := 1 + headerLen + len(p.Data)
+	if err := binary.Write(writer, gOrder, uint32(packetLen)); err != nil {
+		return 0, err
+	}
+	if err := binary.Write(writer, gOrder, byte(p.Type)); err != nil {
+		return 4, err
+	}
+	if 0 < headerLen {
+		if n, err := writer.Write(p.Headers[:headerLen]); err != nil {
+			return int64(1 + n), err
+		}
+	}
+	if 0 < len(p.Data) {
+		if n, err := writer.Write(p.Data); err != nil {
+			return int64(5 + headerLen + n), err
+		}
+	}
+	return int64(4 + packetLen), nil
+}
+
+// Decode and return SeqNum field.
+// Valid for: Request, Reply, Error, Cast
+func (p Packet) SeqNum() uint32 {
+	return gOrder.Uint32(p.Headers[:4])
+}
+
+// Decode and return Deadline field.
+// Valid for: Request
+func (p Packet) RequestDeadline() time.Time {
+	millis := int64(gOrder.Uint64(p.Headers[4:]))
+	return time.Unix(0, millis*1000)
+}
+
+// Decode and return Duration field.
+// Valid for: FlowControlSuspend
+func (p Packet) SuspendDuration() time.Duration {
+	millis := gOrder.Uint64(p.Headers[:])
+	return time.Duration(millis * 1000000)
+}
+
+// Create new request packet.
+func NewRequest(seqNum uint32, deadline time.Time, data []byte) Packet {
+	p := Packet{Type: REQUEST, Data: data}
+	gOrder.PutUint32(p.Headers[:], uint32(seqNum))
+	gOrder.PutUint64(p.Headers[4:], uint64(deadline.UnixNano()/1000))
+	return p
+}
+
+// Create new reply packet.
+func NewReply(seqNum uint32, data []byte) Packet {
+	p := Packet{Type: REPLY, Data: data}
+	gOrder.PutUint32(p.Headers[:], uint32(seqNum))
+	return p
+}
+
+// Create new error packet.
+func NewError(seqNum uint32, data []byte) Packet {
+	p := Packet{Type: ERROR, Data: data}
+	gOrder.PutUint32(p.Headers[:], uint32(seqNum))
+	return p
+}
+
+// Create new cast packet.
+func NewCast(seqNum uint32, data []byte) Packet {
+	p := Packet{Type: CAST, Data: data}
+	gOrder.PutUint32(p.Headers[:], uint32(seqNum))
+	return p
+}
+
+// Create new suspend (flow control) packet.
+func NewSuspend(duration time.Duration) Packet {
+	p := Packet{Type: FLOW_CONTROL_SUSPEND}
+	gOrder.PutUint64(p.Headers[:], uint64(duration/1000000))
+	return p
+}
+
+// Create new resume (flow control) packet.
+func NewResume() Packet {
+	return Packet{Type: FLOW_CONTROL_RESUME}
+}
+
+// Create new uplink cast packet.
+func NewUplinkCast(data []byte) Packet {
+	return Packet{Type: UPLINK_CAST, Data: data}
 }

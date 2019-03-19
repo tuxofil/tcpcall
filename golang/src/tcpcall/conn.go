@@ -19,17 +19,15 @@ import (
 	"io"
 	"net"
 	"sync"
-	"tcpcall/pools"
+	"tcpcall/proto"
 	"time"
 )
-
-// Packet header Len
-const HEADER_LEN = 4
 
 // Errors
 var (
 	MsgConnNotConnectedError = errors.New("msg conn: not connected")
 	MsgTooLongError          = errors.New("incoming message is too long")
+	MsgUnknownError          = errors.New("unknown incoming message")
 )
 
 // Message oriented connection
@@ -49,7 +47,7 @@ type MsgConnConf struct {
 	// Maximum allowed length of incoming packets, in bytes
 	MaxPacketLen int
 	// Mandatory incoming package handler
-	Handler func([]byte)
+	Handler func(proto.Packet)
 	// Optional callback for disconnect event
 	OnDisconnect func()
 	// Minimum time between write buffer flushes
@@ -87,27 +85,15 @@ func (c *MsgConn) SetWriteDeadline(t time.Time) error {
 }
 
 // Send message to the other side.
-func (c *MsgConn) Send(msg [][]byte) error {
+func (c *MsgConn) Send(packet proto.Packet) error {
 	if c == nil {
 		return MsgConnNotConnectedError
 	}
-	msgLen := 0
-	for _, e := range msg {
-		msgLen += len(e)
-	}
 	c.socketMu.Lock()
-	if err := binary.Write(c.buffer, binary.BigEndian, uint32(msgLen)); err != nil {
+	if _, err := packet.WriteTo(c.buffer); err != nil {
 		c.closeUnsafe()
 		c.socketMu.Unlock()
 		return err
-	}
-	// write chunks one by one
-	for _, e := range msg {
-		if _, err := c.buffer.Write(e); err != nil {
-			c.closeUnsafe()
-			c.socketMu.Unlock()
-			return err
-		}
 	}
 	// flush the buffer
 	if c.config.MinFlushPeriod <= 0 ||
@@ -167,23 +153,61 @@ func (c *MsgConn) readLoop() {
 }
 
 // Receive next message from the other side.
-func (c *MsgConn) readPacket() ([]byte, error) {
+func (c *MsgConn) readPacket() (p proto.Packet, err error) {
 	socket := c.socket
 	if socket == nil {
-		return nil, MsgConnNotConnectedError
+		err = MsgConnNotConnectedError
+		return
 	}
-	header := pools.GetFreeBuffer(HEADER_LEN)
-	if _, err := io.ReadAtLeast(socket, header, len(header)); err != nil {
+	var h1 [5]byte // packet len and type
+	err = readFull(socket, h1[:])
+	if err != nil {
+		return
+	}
+	packetLen := int(binary.BigEndian.Uint32(h1[:]))
+	p.Type = int(h1[4])
+	if m := c.config.MaxPacketLen; 0 < m && m < packetLen {
+		err = MsgTooLongError
+		return
+	}
+	// read rest of packet (headers and payload)
+	switch p.Type {
+	case proto.REQUEST:
+		p.Data, err = c.readPacket2(socket, p.Headers[:], packetLen-13)
+	case proto.REPLY:
+		p.Data, err = c.readPacket2(socket, p.Headers[:4], packetLen-5)
+	case proto.ERROR:
+		p.Data, err = c.readPacket2(socket, p.Headers[:4], packetLen-5)
+	case proto.CAST:
+		p.Data, err = c.readPacket2(socket, p.Headers[:4], packetLen-5)
+	case proto.FLOW_CONTROL_SUSPEND:
+		p.Data, err = c.readPacket2(socket, p.Headers[:8], 0)
+	case proto.FLOW_CONTROL_RESUME:
+	case proto.UPLINK_CAST:
+		p.Data, err = c.readPacket2(socket, nil, packetLen-1)
+	default:
+		err = MsgUnknownError
+	}
+	return
+}
+
+func (c *MsgConn) readPacket2(reader io.Reader, h2 []byte, dataLen int) ([]byte, error) {
+	if 0 < len(h2) {
+		if err := readFull(reader, h2); err != nil {
+			return nil, err
+		}
+	}
+	if dataLen == 0 {
+		return nil, nil
+	}
+	buffer := c.config.Allocator(dataLen)
+	if err := readFull(reader, buffer); err != nil {
 		return nil, err
 	}
-	len := int(binary.BigEndian.Uint32(header))
-	pools.ReleaseBuffer(header)
-	if m := c.config.MaxPacketLen; 0 < m && m < len {
-		return nil, MsgTooLongError
-	}
-	buffer := c.config.Allocator(len)
-	if _, err := io.ReadAtLeast(socket, buffer, len); err != nil {
-		return nil, err
-	}
-	return buffer[:len], nil
+	return buffer, nil
+}
+
+func readFull(reader io.Reader, buf []byte) error {
+	_, err := io.ReadAtLeast(reader, buf, len(buf))
+	return err
 }

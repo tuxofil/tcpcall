@@ -70,8 +70,8 @@ type RREntry struct {
 }
 
 type RRReply struct {
-	Reply [][]byte
-	Error [][]byte
+	Reply []byte
+	Error []byte
 }
 
 // Connection state.
@@ -211,12 +211,12 @@ func NewClientConf() ClientConf {
 }
 
 // Make synchronous request to the server.
-func (c *Client) Req(payload []byte, timeout time.Duration) ([]byte, error) {
-	return c.ReqChunks([][]byte{payload}, timeout)
+func (c *Client) ReqChunks(chunks [][]byte, timeout time.Duration) ([]byte, error) {
+	return c.Req(bytes.Join(chunks, nil), timeout)
 }
 
 // Make synchronous request to the server.
-func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, error) {
+func (c *Client) Req(data []byte, timeout time.Duration) ([]byte, error) {
 	c.hit(CC_REQUESTS)
 	entry := &RREntry{
 		Deadline: time.Now().Add(timeout),
@@ -225,8 +225,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	if len(entry.Chan) > 0 {
 		<-entry.Chan
 	}
-	req := proto.NewRequest(payload, entry.Deadline)
-	encoded := req.Encode()
+	seqNum := proto.GenSeqNum()
 	// queue
 	c.registryMu.Lock()
 	if c.config.Concurrency <= len(c.registry) {
@@ -239,13 +238,13 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	// for seqnum collision here. It's unlikely someone
 	// will use concurrency greater than 2^32 to make
 	// such collisions possible.
-	c.registry[req.SeqNum] = entry
+	c.registry[seqNum] = entry
 	c.registryMu.Unlock()
-	defer c.popRegistry(req.SeqNum)
+	defer c.popRegistry(seqNum)
 	// send through the network
-	if err := c.socketSend(encoded); err != nil {
+	packet := proto.NewRequest(seqNum, entry.Deadline, data)
+	if err := c.socketSend(packet); err != nil {
 		c.hit(CC_REQUEST_SEND_FAILS)
-		pools.ReleaseBuffer(encoded[0])
 		gReplyPool.Put(entry.Chan)
 		if err == MsgConnNotConnectedError {
 			return nil, NotConnectedError
@@ -253,7 +252,6 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 		return nil, DisconnectedError
 	}
 	c.log("req sent")
-	pools.ReleaseBuffer(encoded[0])
 	// wait for the response
 	after := pools.GetFreeTimer(entry.Deadline.Sub(time.Now()))
 	select {
@@ -262,7 +260,7 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 		gReplyPool.Put(entry.Chan)
 		if reply.Error == nil {
 			pools.ReleaseTimer(after)
-			return bytes.Join(reply.Reply, []byte{}), nil
+			return reply.Reply, nil
 		}
 		pools.ReleaseTimer(after)
 		return nil, RemoteCrashedError
@@ -273,29 +271,27 @@ func (c *Client) ReqChunks(payload [][]byte, timeout time.Duration) ([]byte, err
 	}
 }
 
-func (c *Client) socketSend(data [][]byte) error {
+func (c *Client) socketSend(packet proto.Packet) error {
 	c.socketMu.RLock()
-	res := c.socket
+	socket := c.socket
 	c.socketMu.RUnlock()
-	return res.Send(data)
+	return socket.Send(packet)
+}
+
+// Make asynchronous request to the server.
+func (c *Client) CastChunks(chunks [][]byte) error {
+	return c.Cast(bytes.Join(chunks, nil))
 }
 
 // Make asynchronous request to the server.
 func (c *Client) Cast(data []byte) error {
-	return c.CastChunks([][]byte{data})
-}
-
-// Make asynchronous request to the server.
-func (c *Client) CastChunks(data [][]byte) error {
 	c.hit(CC_CASTS)
-	encoded := proto.NewCast(data).Encode()
-	if err := c.socketSend(encoded); err != nil {
+	packet := proto.NewCast(proto.GenSeqNum(), data)
+	if err := c.socketSend(packet); err != nil {
 		c.hit(CC_CAST_SEND_FAILS)
-		pools.ReleaseBuffer(encoded[0])
 		return err
 	}
 	c.log("cast sent")
-	pools.ReleaseBuffer(encoded[0])
 	return nil
 }
 
@@ -381,7 +377,7 @@ func (c *Client) disconnect() {
 	c.registryMu.Lock()
 	for _, entry := range c.registry {
 		select {
-		case entry.Chan <- RRReply{nil, [][]byte{[]byte("disconnected")}}:
+		case entry.Chan <- RRReply{nil, []byte("disconnected")}:
 		default:
 		}
 	}
@@ -438,35 +434,27 @@ func (c *Client) notifyPool(connected bool) {
 
 // Callback for message-oriented socket.
 // Handle message received from the remote peer.
-func (c *Client) handlePacket(packet []byte) {
-	ptype, payload, err := proto.Decode(packet)
-	c.log("decoded packet_type=%d; data=%v; err=%s", ptype, payload, err)
-	if err != nil {
-		// close connection on bad packet receive
-		c.log("decode failed: %s", err)
-		c.counters[CC_BAD_PACKETS]++
-		c.disconnect()
-		return
-	}
-	switch ptype {
+func (c *Client) handlePacket(packet proto.Packet) {
+	c.log("decoded packet_type=%d; data=%v",
+		packet.Type, packet.Data)
+	switch packet.Type {
 	case proto.REPLY:
 		c.counters[CC_REPLY_PACKETS]++
-		p := payload.(*proto.PacketReply)
-		if entry, ok := c.popRegistry(p.SeqNum); ok {
-			entry.Chan <- RRReply{p.Reply, nil}
+		if entry, ok := c.popRegistry(packet.SeqNum()); ok {
+			entry.Chan <- RRReply{Reply: packet.Data}
 		}
-		proto.AppendToReply(p)
 	case proto.ERROR:
 		c.counters[CC_ERROR_PACKETS]++
-		p := payload.(*proto.PacketError)
-		if entry, ok := c.popRegistry(p.SeqNum); ok {
-			entry.Chan <- RRReply{nil, p.Reason}
+		if entry, ok := c.popRegistry(packet.SeqNum()); ok {
+			entry.Chan <- RRReply{Error: packet.Data}
 		}
 	case proto.FLOW_CONTROL_SUSPEND:
 		c.counters[CC_SUSPEND_PACKETS]++
 		if c.config.SuspendListener != nil {
-			p := payload.(*proto.PacketFlowControlSuspend)
-			c.config.SuspendListener <- SuspendEvent{c, p.Duration}
+			c.config.SuspendListener <- SuspendEvent{
+				Sender:   c,
+				Duration: packet.SuspendDuration(),
+			}
 		}
 	case proto.FLOW_CONTROL_RESUME:
 		c.counters[CC_RESUME_PACKETS]++
@@ -476,9 +464,10 @@ func (c *Client) handlePacket(packet []byte) {
 	case proto.UPLINK_CAST:
 		c.counters[CC_UCAST_PACKETS]++
 		if c.config.UplinkCastListener != nil {
-			p := payload.(*proto.PacketUplinkCast)
-			flat := bytes.Join(p.Data, []byte{})
-			c.config.UplinkCastListener <- UplinkCastEvent{c, flat}
+			c.config.UplinkCastListener <- UplinkCastEvent{
+				Sender: c,
+				Data:   packet.Data,
+			}
 		}
 	}
 }
