@@ -121,6 +121,10 @@ type ClientConf struct {
 	SyncConnect bool
 	// Enable default logging or not.
 	Trace bool
+	// Optional interface to allocate byte slices for
+	// input requests and casts. Allocator must return a slice of
+	// exact size given as the argument.
+	Allocator func(int) []byte
 }
 
 // Client instance information returned by Info() method.
@@ -342,6 +346,7 @@ func (c *Client) connect() error {
 			MaxPacketLen:    c.config.MaxReplySize,
 			Handler:         c.handlePacket,
 			OnDisconnect:    c.notifyClose,
+			Allocator:       c.config.Allocator,
 		})
 		if err != nil {
 			return err

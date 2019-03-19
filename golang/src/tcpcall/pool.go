@@ -119,6 +119,10 @@ type PoolConf struct {
 	Trace bool
 	// Enable clients debug logging or not.
 	ClientTrace bool
+	// Optional interface to allocate byte slices for
+	// input requests and casts. Allocator must return a slice of
+	// exact size given as the argument.
+	Allocator func(int) []byte
 }
 
 // Pool instance information returned by Info() method.
@@ -475,6 +479,7 @@ func (p *Pool) addWorker(index int, peer string) {
 	cfg.UplinkCastListener = p.config.UplinkCastListener
 	cfg.SyncConnect = false
 	cfg.Trace = p.config.ClientTrace
+	cfg.Allocator = p.config.Allocator
 	worker, _ := Dial(peer, cfg)
 	p.log("adding worker for %s", peer)
 	p.lock.Lock()

@@ -63,6 +63,10 @@ type SharderConf struct {
 	// currently established connections to one server,
 	// 0 means no retries will performed at all.
 	MaxRequestRetries int
+	// Optional interface to allocate byte slices for
+	// input requests and casts. Allocator must return a slice of
+	// exact size given as the argument.
+	Allocator func(int) []byte
 }
 
 // Sharder instance information returned by Info() method.
@@ -186,6 +190,7 @@ func (s *Sharder) setNodes(newNodes []string) {
 			}
 			poolCfg.Peers = peers
 			poolCfg.MaxRequestRetries = s.config.MaxRequestRetries
+			poolCfg.Allocator = s.config.Allocator
 			s.conns[n] = NewPool(poolCfg)
 			s.counters[SHC_POOLS_CREATED]++
 		}
