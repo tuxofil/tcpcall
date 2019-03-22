@@ -53,7 +53,7 @@ func GenSeqNum() uint32 {
 
 // Write packet to the stream.
 // Implements io.WriterTo interface.
-func (p Packet) WriteTo(writer io.Writer) (int64, error) {
+func (p *Packet) WriteTo(writer io.Writer) (int64, error) {
 	headerLen := 4
 	switch p.Type {
 	case REQUEST:
@@ -85,20 +85,20 @@ func (p Packet) WriteTo(writer io.Writer) (int64, error) {
 
 // Decode and return SeqNum field.
 // Valid for: Request, Reply, Error, Cast
-func (p Packet) SeqNum() uint32 {
+func (p *Packet) SeqNum() uint32 {
 	return gOrder.Uint32(p.Headers[:4])
 }
 
 // Decode and return Deadline field.
 // Valid for: Request
-func (p Packet) RequestDeadline() time.Time {
+func (p *Packet) RequestDeadline() time.Time {
 	millis := int64(gOrder.Uint64(p.Headers[4:]))
 	return time.Unix(0, millis*1000)
 }
 
 // Decode and return Duration field.
 // Valid for: FlowControlSuspend
-func (p Packet) SuspendDuration() time.Duration {
+func (p *Packet) SuspendDuration() time.Duration {
 	millis := gOrder.Uint64(p.Headers[:])
 	return time.Duration(millis * 1000000)
 }
