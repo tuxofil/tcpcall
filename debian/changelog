@@ -1,3 +1,13 @@
+tcpcall (2.6.0) unstable; urgency=low
+
+  * Minor optimisation: use pointer receiver
+  * Add Allocator setting for Pool, Client and Sharder
+  * Refactor internals for less allocations
+  * Introduce custom byte slice allocator for server
+  * Extend MsgConn API with MsgConnConf struct
+
+ -- Aleksey Morarash <aleksey.morarash@envisionx.co>  Fri, 22 Mar 2019 11:32:13 +0200
+
 tcpcall (2.5.5) unstable; urgency=low
 
   * Refactor global var name
