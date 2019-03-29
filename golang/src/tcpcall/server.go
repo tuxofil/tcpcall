@@ -117,6 +117,8 @@ type ServerConf struct {
 	// input requests and casts. Allocator must return a slice of
 	// exact size given as the argument.
 	Allocator func(int) []byte
+	// If set, called on connection accept error
+	OnAcceptError func(*Server, error)
 }
 
 // Server instance information returned by Info() method.
@@ -238,6 +240,9 @@ func (s *Server) acceptLoop() {
 		s.counters[SC_ACCEPTED]++
 		if err != nil {
 			s.counters[SC_ACCEPT_ERRORS]++
+			if f := s.config.OnAcceptError; f != nil {
+				f(s, err)
+			}
 			time.Sleep(time.Millisecond * 200)
 			continue
 		}
