@@ -1,3 +1,9 @@
+tcpcall (2.7.0) unstable; urgency=low
+
+  * Add OnAcceptError setting for Server
+
+ -- Aleksey Morarash <aleksey.morarash@envisionx.co>  Mon, 01 Apr 2019 14:47:34 +0300
+
 tcpcall (2.6.0) unstable; urgency=low
 
   * Minor optimisation: use pointer receiver
