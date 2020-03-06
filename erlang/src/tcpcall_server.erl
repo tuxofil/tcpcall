@@ -525,14 +525,14 @@ deliver_request(FunObject, RequestRef, Request)
                           queue_reply(
                             ServerPid, RequestRef, Reply)
                   catch
-                      ExcType:ExcReason ->
+                      ExcType:ExcReason:StackTrace ->
                           queue_error(
                             ServerPid, RequestRef,
                             {crashed,
                              [{type, ExcType},
                               {reason, ExcReason},
                               {stacktrace,
-                               erlang:get_stacktrace()}]})
+                               StackTrace}]})
                   end
           end),
     ok.
