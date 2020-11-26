@@ -1,3 +1,10 @@
+tcpcall (2.7.2) unstable; urgency=low
+
+  * Add go.mod config for the main package
+  * Some fix for OTP 21 (#6)
+
+ -- Aleksey Morarash <aleksey.morarash@gmail.com>  Thu, 26 Nov 2020 23:20:15 +0200
+
 tcpcall (2.7.0) unstable; urgency=low
 
   * Add OnAcceptError setting for Server
